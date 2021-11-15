@@ -8,283 +8,369 @@ import tracks
 racer = tracks.Racer()
 
 ########################################
+# Hyperparameters
+steps_per_epoch = 4000
+epochs = 30
+gamma = 0.99
+clip_ratio = 0.2
+policy_learning_rate = 3e-4
+value_function_learning_rate = 1e-3
+train_policy_iterations = 80
+train_value_iterations = 80
+lam = 0.97
+target_kl = 0.01
+hidden_sizes = (64, 64)
 
-num_states = 5 #we reduce the state dim through observation (see below)
-num_actions = 2 #acceleration and steering
-print("State Space dim: {}, Action Space dim: {}".format(num_states,num_actions))
+num_states = 5  # we reduce the state dim through observation (see below)
+num_actions = 2  # acceleration and steering
+print("State Space dim: {}, Action Space dim: {}".format(num_states, num_actions))
 
 upper_bound = 1
 lower_bound = -1
 
-print("Min and Max Value of Action: {}".format(lower_bound,upper_bound))
+print("Min and Max Value of Action: {}".format(lower_bound, upper_bound))
 
-#The actor choose the move, given the state
-def get_actor():
-    #no special initialization is required
+
+# The actor choose the move, given the state
+def get_actor(logits):
+    # no special initialization is required (next 2 lines)
+
     # Initialize weights between -3e-3 and 3-e3
-    #last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
+    # last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
 
+    inputs = layers.Input(shape=(num_states,))
+
+    model = tf.keras.Model(inputs, logits, name="actor")
+    return model
+
+
+################
+# observation_input = keras.Input(shape=(observation_dimensions,), dtype=tf.float32)
+# logits = mlp(observation_input, list(hidden_sizes) + [num_actions], tf.tanh, None)
+# actor = keras.Model(inputs=observation_input, outputs=logits)
+#
+# value = tf.squeeze(
+#     mlp(observation_input, list(hidden_sizes) + [1], tf.tanh, None), axis=1
+# )
+# critic = keras.Model(inputs=observation_input, outputs=value)
+#
+# def mlp(x, sizes, activation=tf.tanh, output_activation=None):
+#     # Build a feedforward neural network
+#     for size in sizes[:-1]:
+#         x = layers.Dense(units=size, activation=activation)(x)
+#     return layers.Dense(units=sizes[-1], activation=output_activation)(x) #SIZES[-1???]
+#################
+
+def get_logits():
+    inputs = layers.Input(shape=(num_states,))
+    out = layers.Dense(64, activation="tanh")(inputs)
+    out = layers.Dense(64, activation="tanh")(out)
+    # outputs = layers.Dense(num_actions, kernel_regularizer=regularizers.l2(0.01), kernel_initializer=last_init)(out)
+    # outputs = layers.Activation('tanh')(outputs)
+    # outputs = layers.Dense(num_actions, name="out", activation="tanh", kernel_initializer=last_init)(out)
+    outputs = layers.Dense(num_actions, name="out", activation=None)(out)
+
+    return outputs
+
+def get_logits(train_acceleration=True,train_direction=True):
+
+    inputs = layers.Input(shape=(num_states,))
+    out1 = layers.Dense(32, activation="tanh", trainable=train_acceleration)(inputs)
+    out1 = layers.Dense(32, activation="tanh", trainable=train_acceleration)(out1)
+    out1 = layers.Dense(1, activation=None, trainable=train_acceleration)(out1)
+
+    out2 = layers.Dense(32, activation="tanh", trainable=train_direction)(inputs)
+    out2 = layers.Dense(32, activation="tanh", trainable=train_direction)(out2)
+    out2 = layers.Dense(1, activation=None, trainable=train_direction)(out2)
+
+    outputs = layers.concatenate([out1, out2])
+
+    return outputs
+
+def get_critic():
     inputs = layers.Input(shape=(num_states,))
     out = layers.Dense(64, activation="relu")(inputs)
     out = layers.Dense(64, activation="relu")(out)
-    #outputs = layers.Dense(num_actions, kernel_regularizer=regularizers.l2(0.01), kernel_initializer=last_init)(out)
-    #outputs = layers.Activation('tanh')(outputs)
-    #outputs = layers.Dense(num_actions, name="out", activation="tanh", kernel_initializer=last_init)(out)
-    outputs = layers.Dense(num_actions, name="out", activation="tanh")(out)
+    outputs = layers.Dense(1)(out)  # Outputs single value for give state-action
 
-    #outputs = outputs * upper_bound
-    model = tf.keras.Model(inputs, outputs, name="actor")
-    return model
+    outputs = tf.squeeze(outputs, axis=1)
 
-def get_actor(train_acceleration=True,train_direction=True):
-    # the actor has separate towers for action and speed
-    # in this way we can train them separately
-
-    inputs = layers.Input(shape=(num_states,))
-    out1 = layers.Dense(32, activation="relu", trainable=train_acceleration)(inputs)
-    out1 = layers.Dense(32, activation="relu", trainable=train_acceleration)(out1)
-    out1 = layers.Dense(1, activation='tanh', trainable=train_acceleration)(out1)
-
-    out2 = layers.Dense(32, activation="relu", trainable=train_direction)(inputs)
-    out2 = layers.Dense(32, activation="relu",trainable=train_direction)(out2)
-    out2 = layers.Dense(1, activation='tanh',trainable=train_direction)(out2)
-
-    outputs = layers.concatenate([out1,out2])
-
-    #outputs = outputs * upper_bound #resize the range, if required
-    model = tf.keras.Model(inputs, outputs, name="actor")
-    return model
-
-#the critic compute the q-value, given the state and the action
-def get_critic():
-    # State as input
-    state_input = layers.Input(shape=(num_states))
-    state_out = layers.Dense(16, activation="relu")(state_input)
-    state_out = layers.Dense(32, activation="relu")(state_out)
-
-    # Action as input
-    action_input = layers.Input(shape=(num_actions))
-    action_out = layers.Dense(32, activation="relu")(action_input)
-
-    concat = layers.Concatenate()([state_out, action_out])
-
-    out = layers.Dense(64, activation="relu")(concat)
-    out = layers.Dense(64, activation="relu")(out)
-    outputs = layers.Dense(1)(out) #Outputs single value
-
-    model = tf.keras.Model([state_input, action_input], outputs, name="critic")
+    model = tf.keras.Model(inputs, outputs, name="critic")
 
     return model
 
-#Replay buffer
+
+# Trajectories buffer
 class Buffer:
-    def __init__(self, buffer_capacity=100000, batch_size=64):
-        # Max Number of tuples that can be stored
-        self.buffer_capacity = buffer_capacity
-        # Num of tuples used for training
-        self.batch_size = batch_size
+    def __init__(self, observation_dimensions, size, gamma=0.99, lambd=0.95):
+        self.observation_buffer = np.zeros(
+            (size, observation_dimensions), dtype=np.float32
+        )
+        self.action_buffer = np.zeros(size, dtype=np.int32)
+        self.advantage_buffer = np.zeros(size, dtype=np.float32)
+        self.reward_buffer = np.zeros(size, dtype=np.float32)
+        self.return_buffer = np.zeros(size, dtype=np.float32)
+        self.value_buffer = np.zeros(size, dtype=np.float32)
+        self.logprobability_buffer = np.zeros(size, dtype=np.float32)
+        self.gamma, self.lam = gamma, lam
+        self.pointer, self.trajectory_start_index = 0, 0
 
-        # Current number of tuples in buffer
-        self.buffer_counter = 0
+    def record(self, observation, action, reward, value, logprobability):
+        self.observation_buffer[self.pointer] = observation
+        self.action_buffer[self.pointer] = action
+        self.reward_buffer[self.pointer] = reward
+        self.value_buffer[self.pointer] = value
+        self.logprobability_buffer[self.pointer] = logprobability
+        self.pointer += 1
 
-        # We have a different array for each tuple element
-        self.state_buffer = np.zeros((self.buffer_capacity, num_states))
-        self.action_buffer = np.zeros((self.buffer_capacity, num_actions))
-        self.reward_buffer = np.zeros((self.buffer_capacity, 1))
-        self.done_buffer = np.zeros((self.buffer_capacity, 1))
-        self.next_state_buffer = np.zeros((self.buffer_capacity, num_states))
+    def discounted_cumulative_sums(x, discount):
+        # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
+        return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-    # Stores a transition (s,a,r,s') in the buffer
-    def record(self, obs_tuple):
-        s,a,r,T,sn = obs_tuple
-        # restart form zero if buffer_capacity is exceeded, replacing old records
-        index = self.buffer_counter % self.buffer_capacity
+    def trajectory_advantage_rewards(self, last_value=0):
+        # Finish the trajectory by computing advantage estimates and rewards-to-go
+        path_slice = slice(self.trajectory_start_index, self.pointer)
+        rewards = np.append(self.reward_buffer[path_slice], last_value)
+        values = np.append(self.value_buffer[path_slice], last_value)
 
-        self.state_buffer[index] = tf.squeeze(s)
-        self.action_buffer[index] = a
-        self.reward_buffer[index] = r
-        self.done_buffer[index] = T
-        self.next_state_buffer[index] = tf.squeeze(sn)
+        deltas = rewards[:-1] + self.gamma * values[1:] - values[:-1]
 
-        self.buffer_counter += 1
+        self.advantage_buffer[path_slice] = discounted_cumulative_sums(
+            deltas, self.gamma * self.lam
+        )
+        self.return_buffer[path_slice] = discounted_cumulative_sums(
+            rewards, self.gamma
+        )[:-1]
 
-    def sample_batch(self):
-        # Get sampling range
-        record_range = min(self.buffer_counter, self.buffer_capacity)
-        # Randomly sample indices
-        batch_indices = np.random.choice(record_range, self.batch_size)
+        self.trajectory_start_index = self.pointer
 
-        s = self.state_buffer[batch_indices]
-        a = self.action_buffer[batch_indices]
-        r = self.reward_buffer[batch_indices]
-        T = self.done_buffer[batch_indices]
-        sn = self.next_state_buffer[batch_indices]
-        return ((s,a,r,T,sn))
+    def get(self):
+        # Get all data of the buffer and normalize the advantages
+        self.pointer, self.trajectory_start_index = 0, 0
+        advantage_mean, advantage_std = (
+            np.mean(self.advantage_buffer),
+            np.std(self.advantage_buffer),
+        )
+        self.advantage_buffer = (self.advantage_buffer - advantage_mean) / advantage_std
+        return (
+            self.observation_buffer,
+            self.action_buffer,
+            self.advantage_buffer,
+            self.return_buffer,
+            self.logprobability_buffer,
+        )
 
-# Slowly updating target parameters according to the tau rate <<1
+
+def logprobabilities(logits, a):
+    # Compute the log-probabilities of taking actions a by using the logits (i.e. the output of the actor)
+    logprobabilities_all = tf.nn.log_softmax(logits)
+    logprobability = tf.reduce_sum(
+        tf.one_hot(a, num_actions) * logprobabilities_all, axis=1
+    )
+    return logprobability
+
+
+# Sample action from actor
 @tf.function
-def update_target(target_weights, weights, tau):
-    for (a, b) in zip(target_weights, weights):
-        a.assign(b * tau + a * (1 - tau))
+def sample_action(observation):
+    logits = actor(observation)
+    action = tf.squeeze(tf.random.categorical(logits, 1), axis=1)
+    return logits, action
 
-def update_weights(target_weights, weights, tau):
-    return(target_weights * (1- tau) +  weights * tau)
 
-def policy(state,verbose=False):
-    #the policy used for training just add noise to the action
-    #the amount of noise is kept constant during training
-    sampled_action = tf.squeeze(actor_model(state))
-    noise = np.random.normal(scale=0.1,size=2)
-    #we may change the amount of noise for actions during training
-    noise[0] *= 2
-    noise[1] *= .5
-    # Adding noise to action
-    sampled_action = sampled_action.numpy()
-    sampled_action += noise
-    #in verbose mode, we may print information about selected actions
-    if verbose and sampled_action[0] < 0:
-        print("decelerating")
+# Train the policy by maxizing the PPO-Clip objective
+@tf.function
+def train_policy(observation_buffer, action_buffer, logprobability_buffer, advantage_buffer):
+    with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
+        ratio = tf.exp(
+            logprobabilities(actor(observation_buffer), action_buffer)
+            - logprobability_buffer
+        )
+        min_advantage = tf.where(
+            advantage_buffer > 0,
+            (1 + clip_ratio) * advantage_buffer,
+            (1 - clip_ratio) * advantage_buffer,
+        )
 
-    #Finally, we ensure actions are within bounds
-    legal_action = np.clip(sampled_action, lower_bound, upper_bound)
+        policy_loss = -tf.reduce_mean(
+            tf.minimum(ratio * advantage_buffer, min_advantage)
+        )
+    policy_grads = tape.gradient(policy_loss, actor.trainable_variables)
+    policy_optimizer.apply_gradients(zip(policy_grads, actor.trainable_variables))
 
-    return [np.squeeze(legal_action)]
+    kl = tf.reduce_mean(
+        logprobability_buffer
+        - logprobabilities(actor(observation_buffer), action_buffer)
+    )
+    kl = tf.reduce_sum(kl)
+    return kl
 
-#creating models
-actor_model = get_actor()
-critic_model = get_critic()
-#actor_model.summary()
-#critic_model.summary()
 
-#we create the target model for double learning (to prevent a moving target phenomenon)
-target_actor = get_actor()
-target_critic = get_critic()
-target_actor.trainable = False
-target_critic.trainable = False
+# Train the value function by regression on mean-squared error
+@tf.function
+def train_value_function(observation_buffer, return_buffer):
+    with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
+        value_loss = tf.reduce_mean((return_buffer - critic(observation_buffer)) ** 2)
+    value_grads = tape.gradient(value_loss, critic.trainable_variables)
+    value_optimizer.apply_gradients(zip(value_grads, critic.trainable_variables))
 
-#We compose actor and critic in a single model.
-#The actor is trained by maximizing the future expected reward, estimated
-#by the critic. The critic should be freezed while training the actor.
-#For simplicitly, we just use the target critic, that is not trainable.
 
-def compose(actor,critic):
-    state_input = layers.Input(shape=(num_states))
-    a = actor(state_input)
-    q = critic([state_input,a])
-    #reg_weights = actor.get_layer('out').get_weights()[0]
-    #print(tf.reduce_sum(0.01 * tf.square(reg_weights)))
+### CREATE MODELS ###
 
-    m = tf.keras.Model(state_input, q)
-    #the loss function of the compound model is just the opposite of the critic output
-    m.add_loss(-q)
-    return(m)
+buffer = Buffer(num_states, steps_per_epoch)
 
-aux_model = compose(actor_model,target_critic)
 
-## TRAINING ##
-#pesi
-# ddpg_critic_weigths_32_car0_split.h5 #versione con reti distinte per le mosse. Muove bene ma lento
-# ddpg_critic_weigths_32_car1_split.h5 #usual problem: sembra ok
+logits = get_logits()
+actor = get_actor(logits)
+critic = get_critic()
 
-load_weights = True
-save_weights = False #beware when saving weights to not overwrite previous data
+logits.summary()
+actor.summary()
+critic.summary()
 
-if load_weights:
-    critic_model.load_weights("weights/ddpg_critic_weigths_32_car3_split.h5")
-    actor_model.load_weights("weights/ddpg_actor_weigths_32_car3_split.h5")
 
-# Making the weights equal initially
-target_actor_weights = actor_model.get_weights()
-target_critic_weights = critic_model.get_weights()
-target_actor.set_weights(target_actor_weights)
-target_critic.set_weights(target_critic_weights)
+# Initialize the policy and the value function optimizers
+policy_optimizer = keras.optimizers.Adam(learning_rate=policy_learning_rate)
+value_optimizer = keras.optimizers.Adam(learning_rate=value_function_learning_rate)
 
-# Learning rate for actor-critic models
-critic_lr = 0.001
-aux_lr = 0.001
+actor.compile(loss='mse', optimizer=policy_optimizer)
+critic.compile(optimizer=value_optimizer)
 
-critic_optimizer = tf.keras.optimizers.Adam(critic_lr)
-aux_optimizer = tf.keras.optimizers.Adam(aux_lr)
+## TRAINING - DA RIGUARDARE!!!! ##
 
-critic_model.compile(loss='mse',optimizer=critic_optimizer)
-aux_model.compile(optimizer=aux_optimizer)
-
-total_episodes = 10
-# Discount factor
-gamma = 0.99
-# Target network parameter update factor, for double DQN
-tau = 0.005
-
-buffer = Buffer(50000, 64)
-
-# History of rewards per episode
-ep_reward_list = []
-# Average reward history of last few episodes
-avg_reward_list = []
-
-# custom observation of the state
-# it must return an array to be passed as input to both actor and critic
 
 # we extract from the lidar signal the angle dir corresponding to maximal distance max_dir from track borders
 # as well as the the distance at adjacent positions.
-
-def max_lidar(observation,angle=np.pi/3,pins=19):
+def max_lidar(observation, angle=np.pi / 3, pins=19):
     arg = np.argmax(observation)
     dir = -angle / 2 + arg * (angle / (pins - 1))
     dist = observation[arg]
     if arg == 0:
         distl = dist
     else:
-        distl = observation[arg-1]
-    if arg == pins-1:
+        distl = observation[arg - 1]
+    if arg == pins - 1:
         distr = dist
     else:
-        distr = observation[arg+1]
-    return(dir,(distl,dist,distr))
+        distr = observation[arg + 1]
+    return (dir, (distl, dist, distr))
+
 
 def observe(racer_state):
     if racer_state == None:
-        return np.array([0]) #not used; we could return None
+        return np.array([0])  # not used; we could return None
     else:
         lidar_signal, v = racer_state
-        dir, (distl,dist,distr) = max_lidar(lidar_signal)
+        dir, (distl, dist, distr) = max_lidar(lidar_signal)
         return np.array([dir, distl, dist, distr, v])
 
-def train(total_episodes=total_episodes):
-    i = 0
-    mean_speed = 0
 
-    for ep in range(total_episodes):
+state, episode_return, episode_length = racer.reset(), 0, 0
 
-        prev_state = observe(racer.reset())
-        episodic_reward = 0
-        mean_speed += prev_state[4]
-        done = False
 
-        while not(done):
-            i = i+1
+def train():
+
+    for ep in range(epochs):
+
+        # Initialize the sum of the returns, lengths and number of episodes for each epoch
+        sum_return = 0
+        sum_length = 0
+        num_episodes = 0
+
+        for t in range(steps_per_epoch):
+
+            # Get the logits, action, and take one step in the environment
+            state = observe(state)
+
+            logits, action = sample_action(state)
+            state_new, reward, done, _ = racer.step(action)
+
+            episode_return += reward
+            episode_length += 1
+
+
+            # Get the value and log-probability of the action
+            value_t = critic(state)
+            logprobability_t = logprobabilities(logits, action)
+
+            # Store obs, act, rew, v_t, logp_pi_t
+            buffer.store(state, action, reward, value_t, logprobability_t)
+
+            # Update the state
+            state = state_new
+
+
+            # Finish trajectory if reached to a terminal state
+
+            # we distinguish between termination with failure (state = None) and succesfull termination on track completion
+            # succesfull termination is stored as a normal tuple
+            fail = done and state == None
+
+            buffer.record((prev_state, action, reward, fail, state))
+            if not (done):
+                mean_speed += state[4]
+            if terminal or (t == steps_per_epoch - 1):
+                last_value = 0 if done else critic(observe(state))
+                buffer.finish_trajectory(last_value)
+                sum_return += episode_return
+                sum_length += episode_length
+                num_episodes += 1
+                state, episode_return, episode_length = env.reset(), 0, 0
+
+            # Get values from the buffer
+        (
+            observation_buffer,
+            action_buffer,
+            advantage_buffer,
+            return_buffer,
+            logprobability_buffer,
+        ) = buffer.get()
+
+        # Update the policy and implement early stopping using KL divergence
+        for _ in range(train_policy_iterations):
+            kl = train_policy(
+                observation_buffer, action_buffer, logprobability_buffer, advantage_buffer
+            )
+            if kl > 1.5 * target_kl:
+                # Early Stopping
+                break
+
+        # Update the value function
+        for _ in range(train_value_iterations):
+            train_value_function(observation_buffer, return_buffer)
+
+        # Print mean return and length for each epoch
+        print(
+            f" Epoch: {epoch + 1}. Mean Return: {sum_return / num_episodes}. Mean Length: {sum_length / num_episodes}"
+        )
+
+
+        ### TRAIN DDPG ###
+
+        while not (done):
+            i = i + 1
 
             tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
 
-            #our policy is always noisy
+            # our policy is always noisy
             action = policy(tf_prev_state)[0]
             # Get state and reward from the environment
             state, reward, done = racer.step(action)
-            #we distinguish between termination with failure (state = None) and succesfull termination on track completion
-            #succesfull termination is stored as a normal tuple
-            fail = done and state==None
+            # we distinguish between termination with failure (state = None) and succesfull termination on track completion
+            # succesfull termination is stored as a normal tuple
+            fail = done and state == None
             state = observe(state)
             buffer.record((prev_state, action, reward, fail, state))
-            if not(done):
+            if not (done):
                 mean_speed += state[4]
 
             buffer.record((prev_state, action, reward, done, state))
             episodic_reward += reward
 
-            states,actions,rewards,dones,newstates= buffer.sample_batch()
-            targetQ = rewards + (1-dones)*gamma*(target_critic([newstates,target_actor(newstates)]))
+            states, actions, rewards, dones, newstates = buffer.sample_batch()
+            targetQ = rewards + (1 - dones) * gamma * (target_critic([newstates, target_actor(newstates)]))
 
-            loss1 = critic_model.train_on_batch([states,actions],targetQ)
+            loss1 = critic_model.train_on_batch([states, actions], targetQ)
             loss2 = aux_model.train_on_batch(states)
 
             update_target(target_actor.variables, actor_model.variables, tau)
@@ -296,8 +382,8 @@ def train(total_episodes=total_episodes):
 
         # Mean of last 40 episodes
         avg_reward = np.mean(ep_reward_list[-40:])
-        print("Episode {}: Avg. Reward = {}, Last reward = {}. Avg. speed = {}".format(ep, avg_reward,episodic_reward,mean_speed/i))
-
+        print("Episode {}: Avg. Reward = {}, Last reward = {}. Avg. speed = {}".format(ep, avg_reward, episodic_reward,
+                                                                                       mean_speed / i))
 
         avg_reward_list.append(avg_reward)
 
@@ -311,14 +397,16 @@ def train(total_episodes=total_episodes):
         plt.ylabel("Avg. Episodic Reward")
         plt.show()
 
-#train()
+
+# train()
 
 def actor(state):
     print("speed = {}".format(state[1]))
     state = observe(state)
     state = tf.expand_dims(state, 0)
     action = actor_model(state)
-    print("acc = ",action[0,0].numpy())
-    return(action[0])
+    print("acc = ", action[0, 0].numpy())
+    return (action[0])
 
-tracks.newrun(racer,actor)
+
+tracks.newrun(racer, actor)
