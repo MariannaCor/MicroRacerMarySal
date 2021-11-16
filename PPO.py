@@ -32,15 +32,14 @@ print("Min and Max Value of Action: {}".format(lower_bound, upper_bound))
 
 
 # The actor choose the move, given the state
-def get_actor(logits):
-    # no special initialization is required (next 2 lines)
-
-    # Initialize weights between -3e-3 and 3-e3
-    # last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
+def get_actor():
 
     inputs = layers.Input(shape=(num_states,))
+    out = layers.Dense(64, activation="relu")(inputs)
+    out = layers.Dense(64, activation="relu")(out)
+    outputs = layers.Dense(num_actions, name="out", activation='tanh')(out)
 
-    model = tf.keras.Model(inputs, logits, name="actor")
+    model = tf.keras.Model(inputs, outputs, name="actor")
     return model
 
 
@@ -173,8 +172,13 @@ def logprobabilities(logits, a):
 # Sample action from actor
 @tf.function
 def sample_action(observation):
+    print("observation: ", observation)
     logits = actor(observation)
-    action = tf.squeeze(tf.random.categorical(logits, 1), axis=1)
+    print("LOGITS: ", logits)
+    randomElement= tf.random.categorical(logits, 2)
+    print("randomElement: ", randomElement)
+    action = tf.squeeze(randomElement)
+    print("action: ", action)
     return logits, action
 
 
@@ -220,21 +224,16 @@ def train_value_function(observation_buffer, return_buffer):
 buffer = Buffer(num_states, steps_per_epoch)
 
 
-logits = get_logits()
-actor = get_actor(logits)
+actor = get_actor()
 critic = get_critic()
 
-logits.summary()
 actor.summary()
 critic.summary()
 
 
 # Initialize the policy and the value function optimizers
-policy_optimizer = keras.optimizers.Adam(learning_rate=policy_learning_rate)
-value_optimizer = keras.optimizers.Adam(learning_rate=value_function_learning_rate)
-
-actor.compile(loss='mse', optimizer=policy_optimizer)
-critic.compile(optimizer=value_optimizer)
+policy_optimizer = tf.keras.optimizers.Adam(learning_rate=policy_learning_rate)
+value_optimizer = tf.keras.optimizers.Adam(learning_rate=value_function_learning_rate)
 
 ## TRAINING - DA RIGUARDARE!!!! ##
 
@@ -256,6 +255,8 @@ def max_lidar(observation, angle=np.pi / 3, pins=19):
     return (dir, (distl, dist, distr))
 
 
+# input: state (actual observation) ; return dir (max distance from borders) + adjent to dir (distl, distr, dist)
+# + v from actual observation
 def observe(racer_state):
     if racer_state == None:
         return np.array([0])  # not used; we could return None
@@ -265,7 +266,7 @@ def observe(racer_state):
         return np.array([dir, distl, dist, distr, v])
 
 
-state, episode_return, episode_length = racer.reset(), 0, 0
+observation, episode_return, episode_length = racer.reset(), 0, 0
 
 
 def train():
@@ -280,10 +281,14 @@ def train():
         for t in range(steps_per_epoch):
 
             # Get the logits, action, and take one step in the environment
-            state = observe(state)
+            observation2 = observe(observation)
 
-            logits, action = sample_action(state)
+            logits, action = sample_action(tf.expand_dims(tf.convert_to_tensor(observation2), 0))
             state_new, reward, done, _ = racer.step(action)
+
+            print("state_new", state_new)
+            print("reward", reward)
+            print("done", done)
 
             episode_return += reward
             episode_length += 1
@@ -398,7 +403,7 @@ def train():
         plt.show()
 
 
-# train()
+train()
 
 def actor(state):
     print("speed = {}".format(state[1]))

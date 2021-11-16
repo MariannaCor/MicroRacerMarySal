@@ -153,8 +153,8 @@ def policy(state,verbose=False):
 #creating models
 actor_model = get_actor()
 critic_model = get_critic()
-#actor_model.summary()
-#critic_model.summary()
+actor_model.summary()
+critic_model.summary()
 
 #we create the target model for double learning (to prevent a moving target phenomenon)
 target_actor = get_actor()
@@ -311,7 +311,7 @@ def train(total_episodes=total_episodes):
         plt.ylabel("Avg. Episodic Reward")
         plt.show()
 
-#train()
+train()
 
 def actor(state):
     print("speed = {}".format(state[1]))
