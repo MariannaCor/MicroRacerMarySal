@@ -41,28 +41,23 @@ if __name__ == '__main__':
 
     env = tracks.Racer()
 
-    num_states = 5   # we reduce the state dim through observation (see below)
+    state_dimension = 5   # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
 
-    agent = Agent(num_states = num_states, num_actions = num_actions)
+    agent = Agent(state_dimension = state_dimension, num_actions = num_actions)
     agent.summary() #it prints a summary of the Agent
 
     done = False
     observation = env.reset() #prima osservazione
     state = fromObservationToModelState(observation)
-    probs, action = agent.choose_action(state)
+    action = agent.choose_action(state)
+    print("action squeezed is ", action)
 
-    # possible causes are : using a batch_size larger that my training set or action.numpy()
-    print("np array action ", np.array(action))
+    observation_, reward, info = env.step(action) #prima mossa.
 
-
-    observation_, reward, done, info = env.step(np.array(action)) #prima mossa.
-
-    print("probs = ",probs)
     print("action = ", action)
     print("reward = ", reward)
     print("obs_ = ", observation_)
-    print("done = ", done)
     print("info = ", info)
 
 

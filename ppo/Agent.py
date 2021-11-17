@@ -30,13 +30,33 @@ class ActorNet():
     def __init__(self, input_dims, output_dims, lr=0.0003 ):
         #mancano da definire checkpoints e device di esecuzione
 
-        inputs = layers.Input(shape=(input_dims, ))
-        out = layers.Dense(64, activation="relu")(inputs)
-        out = layers.Dense(64, activation="relu")(out)
-        outputs = layers.Dense(output_dims, name="out", activation="softmax")(out)
+        # the actor has separate towers for action and speed
+        # in this way we can train them separately
 
+        inputs = layers.Input(shape=(input_dims,))
+        #una torre stima l'accelleration
+        out1 = layers.Dense(86, activation="relu")(inputs)
+        out1 = layers.Dense(86, activation="relu")(out1)
+        out1 = layers.Dense(1, activation='tanh')(out1)
+
+        # una torre stima la direzione
+        out2 = layers.Dense(86, activation="relu")(inputs)
+        out2 = layers.Dense(86, activation="relu")(out2)
+        out2 = layers.Dense(1, activation='tanh')(out2)
+
+        outputs = layers.concatenate([out1, out2])
+
+        # outputs = outputs * upper_bound #resize the range, if required
         self.model = tf.keras.Model(inputs, outputs, name="ActorNet")
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+
+      #  inputs = layers.Input(shape=(input_dims, ))
+      #  out = layers.Dense(64, activation="relu")(inputs)
+      #  out = layers.Dense(64, activation="relu")(out)
+      #  outputs = layers.Dense(output_dims, name="out", activation="softmax")(out)
+
+      #  self.model = tf.keras.Model(inputs, outputs, name="ActorNet")
+
 
     def getModel(self):
         return self.model
@@ -54,25 +74,23 @@ class ActorNet():
 
 class Agent:
 
-    def __init__(self,num_states, num_actions, alpha=0.0003 ):
+    def __init__(self,state_dimension, num_actions, alpha=0.0003 ):
 
         self.alpha = alpha
-        self.num_states = num_states
+        self.state_dimension = state_dimension
         self.num_action = num_actions
 
-        self.actor= ActorNet(input_dims= self.num_states, output_dims = self.num_action, lr=alpha).getModel()
+        self.actor= ActorNet(input_dims= state_dimension , output_dims = self.num_action, lr=alpha ).getModel()
 
         #self.critic = CriticNet()
         #self.memory = Memory()
 
     def choose_action(self, state):
-        print("choose action called ")
-        print("state is", state.numpy() )
-        logits = self.actor(state)
-        print("is returned ", logits.numpy())
-        action = tf.squeeze(tf.random.categorical(logits, 2))
-
-        return logits, action
+        print("Agent choose the action")
+        print("input state is", state)
+        mu_values = self.actor(state)
+        action = tf.squeeze(mu_values)
+        return action
 
 
 
@@ -98,8 +116,8 @@ class Agent:
 
     def summary(self):
         print("The Agent is now working:\n")
-        ##..other information will be added later
-        ##self.actor.summary()
+        #..other information will be added later
+        #self.actor.summary()
 
 
 
