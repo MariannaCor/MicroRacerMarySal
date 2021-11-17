@@ -69,7 +69,7 @@ class ActorNet():
       #  inputs = layers.Input(shape=(input_dims, ))
       #  out = layers.Dense(64, activation="relu")(inputs)
       #  out = layers.Dense(64, activation="relu")(out)
-      #  outputs = layers.Dense(output_dims, name="out", activation="softmax")(out)
+      #  outputs = layers.Dense(output_dims, name="out", activation="tanh")(out)
       #  self.model = tf.keras.Model(inputs, outputs, name="ActorNet")
 
 
@@ -80,7 +80,6 @@ class ActorNet():
     def load_checkpoint(self): None
 
 
-#
 # class CriticNet():
 #     def __init__(self):None
 #     def save_checkpoint(self): None
@@ -96,13 +95,13 @@ class Agent:
         self.num_action = num_actions
 
         self.memory = Memory(chunk_memory_size)
-        self.actor= ActorNet(input_dims= state_dimension, lr=alpha ).getModel()
+        self.actor = ActorNet(input_dims= state_dimension, lr=alpha ).getModel()
         #self.critic = CriticNet()
 
 
     def choose_action(self, state):
         print("Agent choose the action")
-        print("input state is", state)
+        print("input state is", state.numpy() )
         mu_values = self.actor(state)
         action = tf.squeeze(mu_values)
         return action

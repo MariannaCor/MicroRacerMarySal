@@ -43,50 +43,61 @@ if __name__ == '__main__':
 
     state_dim = 5   # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
-    chunk_memory_size = 10
+    chunk_memory_size = 50
 
     agent = Agent(state_dimension = state_dim, num_actions=num_actions, chunk_memory_size = 10)
-    agent.summary() #it prints a summary of the Agent
-
+    #agent.summary() #it prints a summary of the Agent
     done = False
-    observation = env.reset() #prima osservazione
-    state = fromObservationToModelState(observation)
-    action = agent.choose_action(state)
-    print("action squeezed is ", action)
 
-    observation_, reward, done = env.step(action) # prima mossa
+    #observation = env.reset() #prima osservazione
+    #state = fromObservationToModelState(observation)
+    # print("state in input of the net is ", state)
+    # action = agent.choose_action(state)
+    #
+    # print("returned action is ", action)
+    #
+    # observation_, reward, done = env.step(action) # prima mossa
+    #
+    # print("obs_ ", observation_)
+    # print("reward ", reward)
+    # print("done ", done)
+    #
+    # agent.remember(observation, action, reward, done)
 
-    agent.remember(observation, action, reward, done)
-    agent.summary()
-    #
-    # n_games = 300
-    # best_score = env.reward_range[0]
-    # score_history = []
-    #
-    # learn_iters = 0 # mi serve per la print
-    # avg_score = 0   #
-    # n_steps = 0     #conto gli step per fermarmi ogni N
-    #
-    # for i in range(n_games):
-    #     observation = env.reset()
-    #     done = False
-    #     score = 0
-    #     while not done:
-    #         action, prob, val = agent.choose_action(observation)
-    #         observation_, reward, done, info = env.step(action)
-    #         n_steps += 1
-    #         score += reward
-    #         agent.remember(observation, action, prob, val, reward, done)
-    #         if n_steps % N == 0:
-    #             agent.train()
-    #             learn_iters += 1
-    #         observation = observation_
-    #     #score_history.append(score)
-    #     avg_score = np.mean(score_history[-100:])
-    #
-    #     if avg_score > best_score:
-    #         best_score = avg_score
-    #         agent.save_models()
-    #
-    #     print('episode', i, 'score %.1f' % score, 'avg score %.1f' % avg_score,
-    #             'time_steps', n_steps, 'learning_steps', learn_iters)
+    n_races = 300
+    N = 20;
+    #best_score = env.reward_range[0]
+    best_score = 0;
+    score_history = []
+
+    learn_iters = 0 # mi serve per la print
+    avg_score = 0   #
+    n_steps = 0     #conto gli step per fermarmi ogni N
+
+    for race in range(n_races):
+
+         observation = env.reset()
+         done = False
+         score = 0
+
+
+         while not done:
+             state = fromObservationToModelState(observation)
+             action = agent.choose_action(state)
+             observation_, reward, done = env.step(action)
+             n_steps += 1
+             score += reward
+             agent.remember(observation, action, reward, done)
+             if n_steps % N == 0:
+                 agent.training()
+                 learn_iters += 1
+             observation = observation_
+         #score_history.append(score)
+         #avg_score = np.mean(score_history[-100:])
+
+         #if avg_score > best_score:
+         #    best_score = avg_score
+         #    agent.save_models()
+
+         print('episode=race', race, 'score %.1f' % score, 'avg score %.1f' % avg_score,
+                 'time_steps', n_steps, 'learning_steps', learn_iters)
