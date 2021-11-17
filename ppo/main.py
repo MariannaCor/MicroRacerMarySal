@@ -41,10 +41,11 @@ if __name__ == '__main__':
 
     env = tracks.Racer()
 
-    state_dimension = 5   # we reduce the state dim through observation (see below)
+    state_dim = 5   # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
+    chunk_memory_size = 10
 
-    agent = Agent(state_dimension = state_dimension, num_actions = num_actions)
+    agent = Agent(state_dimension = state_dim, num_actions=num_actions, chunk_memory_size = 10)
     agent.summary() #it prints a summary of the Agent
 
     done = False
@@ -53,17 +54,10 @@ if __name__ == '__main__':
     action = agent.choose_action(state)
     print("action squeezed is ", action)
 
-    observation_, reward, info = env.step(action) #prima mossa.
+    observation_, reward, done = env.step(action) # prima mossa
 
-    print("action = ", action)
-    print("reward = ", reward)
-    print("obs_ = ", observation_)
-    print("info = ", info)
-
-
-   # agent.remember(observation, action, prob, val, reward, done)
-
-
+    agent.remember(observation, action, reward, done)
+    agent.summary()
     #
     # n_games = 300
     # best_score = env.reward_range[0]
