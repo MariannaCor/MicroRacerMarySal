@@ -12,10 +12,27 @@ class Memory:
          self.values = []
          self.dones = []
 
-         self.size = chunk_size*4
+         self.chunk_size = chunk_size
 
      def generate_batches(self):
-         print("Generating batches")
+         print("generates bathces ")
+         n_states = len(self.states)
+         #numpy.arrange([start, ]stop, [step, ], dtype = None) -> numpy.ndarray
+         #es np.arange(0,10,2,float)  -> [0. 2. 4. 6. 8.]
+         batch_start = np.arange(0, n_states, self.chunk_size)
+         print( "batch_start = ", batch_start)
+         indices = np.arange(n_states, dtype=np.int64)
+         print("indices =", indices)
+         np.random.shuffle(indices)
+         batches = [indices[i:i + self.chunk_size] for i in batch_start]
+         print("batches =", batches)
+
+         return np.array(self.states), \
+                np.array(self.actions), \
+                np.array(self.values), \
+                np.array(self.rewards), \
+                np.array(self.dones), \
+                batches
 
      def store_memory(self, state, action, reward,value, done):
          self.states.append(state)
@@ -112,7 +129,6 @@ class Agent:
         self.alpha = alpha
         self.state_dimension = state_dimension
 
-
         self.memory = Memory(chunk_memory_size)
         self.actor = ActorNet(input_dims= state_dimension, lr=alpha ).getModel()
         self.critic = CriticNet(input_dims=state_dimension, lr= alpha).getModel()
@@ -121,7 +137,6 @@ class Agent:
     def choose_action(self, state):
         mu_values = self.actor(state)
         action = tf.squeeze(mu_values)
-
         v_value = self.critic(state)
 
         return action,v_value
@@ -141,16 +156,14 @@ class Agent:
         self.actor.load_checkpoint()
         self.critic.load_checkpoint()
 
-
-
-    def training(self):
+    def training(self, n_epochs=50, gamma=0.99, alpha=0.0003, gae_lambda=0.95, policy_clip=0.2):
         print("\n\n start learning new weights ..\n\n ")
 
         #definiamo un numero di epoche di cui vorremmo fare allenamento.
-        for _ in range(self.n_epochs):
+        for _ in range(n_epochs):
             #per ogni epoca generiamo una serie di osservazioni dalla self memory... la politica di generazione sta a noi definire come.
-                state_arr, action_arr, old_prob_arr, vals_arr, reward_arr, dones_arr, batches = self.memory.generate_batches()
-
+                state_arr, action_arr, vals_arr, reward_arr, dones_arr, batches = self.memory.generate_batches()
+                #old_prob_arr,
                 #mi sono salvato in memoria tutti i valori del critico man mano nell array vals.
                 #mi creo per ogni epoca un array dove mi stimo l'advantage. questa sotto è l'inizializzazione.
                 advantage = np.zeros(len(reward_arr), dtype=np.float32)
@@ -161,8 +174,8 @@ class Agent:
                     discount = 1
                     a_t = 0
                     for k in range(t, len(reward_arr) - 1):
-                        a_t += discount * (reward_arr[k] + self.gamma * values[k + 1] * (1 - int(dones_arr[k])) - values[k])
-                        discount *= self.gamma * self.gae_lambda
+                        a_t += discount * (reward_arr[k] + gamma * vals_arr[k + 1] * (1 - int(dones_arr[k])) - vals_arr[k])
+                        discount *= gamma * gae_lambda
                     advantage[t] = a_t
                 # uscito dal ciclo converto values ed advantage corrispettivi in tensori tensorflow nell'esempio
                 advantage = tf.convert_to_tensor(advantage)

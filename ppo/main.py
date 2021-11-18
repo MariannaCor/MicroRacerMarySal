@@ -61,7 +61,7 @@ if __name__ == '__main__':
     # print("done ", done)
     #
     # agent.remember(observation, action, reward, done)
-    n_races = 2
+    n_races = 10
     N = 20;
     n_steps = 0     #conto gli step per fermarmi ogni N
 
@@ -77,6 +77,6 @@ if __name__ == '__main__':
              score += reward
              agent.remember(observation, action, reward,v_value, done)
              if n_steps % N == 0:
-                 agent.training()
+                 agent.training(n_epochs= 50)
 
              observation = observation_
