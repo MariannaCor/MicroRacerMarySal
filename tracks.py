@@ -241,8 +241,8 @@ class Racer:
         acc, turn = action
         acc.numpy()
         turn.numpy()
-        print("acc: ", acc)
-        print("turn: ", turn)
+        print("acc: ", acc.numpy())
+        print("turn: ", turn.numpy())
         v = (self.carvx ** 2 + self.carvy ** 2) ** .5
         newv = max(0, v + acc * max_incr)
         cardir = np.arctan2(self.carvy, self.carvx)
@@ -260,10 +260,10 @@ class Racer:
             self.carvy = newcarvy
             reward = newv * self.tstep
             lidar_signal = lidar_grid(self.carx, self.cary, self.carvx, self.carvy, self.map)
-            print("CURRENT STATE = ")
-            print(lidar_signal)
-            print("V = ", v)
-            print("V*tstep = ", v * self.tstep)
+            #print("CURRENT STATE = ")
+            #print(lidar_signal)
+            #print("V = ", v)
+            #print("V*tstep = ", v * self.tstep)
             # dir,dist = max_lidar2(obs)
             if complete(newcartheta, self.cartheta):
                 print("completed")
