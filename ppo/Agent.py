@@ -4,6 +4,10 @@ import tensorflow as tf
 from tensorflow.keras import layers
 
 
+
+# Define a single scalar Normal distribution.
+#dist = tfd.Normal(loc=0., scale=3.)
+
 class Memory:
      def __init__(self, chunk_size):
          self.states = []
@@ -70,27 +74,27 @@ class ActorNet():
         # the actor has separate towers for direction and acceleration
         # in this way we can train them separately
         inputs = layers.Input(shape=(input_dims,))
+
         #acceleration
-        out1 = layers.Dense(86, activation="relu")(inputs)
-        out1 = layers.Dense(86, activation="relu")(out1)
-        out1 = layers.Dense(1, activation='tanh')(out1)
+        out1 = layers.Dense(256, activation="relu")(inputs)
+        out1 = layers.Dense(256, activation="relu")(out1)
+        # mu,var of accelleration
+        mu_acc_out = layers.Dense(1, activation='tanh')(out1)
+        var_acc_out = layers.Dense(1, activation='softplus')(out1)
+
 
         #direction
-        out2 = layers.Dense(86, activation="relu")(inputs)
-        out2 = layers.Dense(86, activation="relu")(out2)
-        out2 = layers.Dense(1, activation='tanh')(out2)
+        out2 = layers.Dense(256, activation="relu")(inputs)
+        out2 = layers.Dense(256, activation="relu")(out2)
+        # mu,var of direction
+        mu_dir_out = layers.Dense(1, activation='tanh')(out2)
+        var_dir_out = layers.Dense(1, activation='softplus')(out1)
 
-        outputs = layers.concatenate([out1, out2])
+        outputs = layers.concatenate([mu_acc_out,var_acc_out,mu_dir_out,var_dir_out])
 
-        # outputs = outputs * upper_bound #resize the range, if required
         self.model = tf.keras.Model(inputs, outputs, name="ActorNet")
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-      #  inputs = layers.Input(shape=(input_dims, ))
-      #  out = layers.Dense(64, activation="relu")(inputs)
-      #  out = layers.Dense(64, activation="relu")(out)
-      #  outputs = layers.Dense(output_dims, name="out", activation="tanh")(out)
-      #  self.model = tf.keras.Model(inputs, outputs, name="ActorNet")
 
 
     def getModel(self):
@@ -134,13 +138,55 @@ class Agent:
         self.critic = CriticNet(input_dims=state_dimension, lr= alpha).getModel()
 
 
+    def pdf(self, guess ,mean, sd):
+        return (np.pi * sd) * np.exp(-0.5 * ((guess - mean) / sd) ** 2)
+
+
+    def samplingAction(self,action):
+
+        acc_dist,dir_dist = tf.split(value=action,num_or_size_splits=2, axis=1)
+
+        print("acc_dist = ",acc_dist)
+        print("dir_dist = ",dir_dist)
+
+        mean_acc = acc_dist[0][0]
+        stddev_acc = tf.sqrt(acc_dist[0][1])
+        print("mean_acc = ",mean_acc)
+        print("stddev_acc = ", stddev_acc)
+
+        mean_dir = dir_dist[0][0]
+        stddev_dir = tf.sqrt(dir_dist[0][1])
+        print("mean_dir = ",mean_dir)
+        print("stddev_dir = ", stddev_dir)
+
+        print("questi li passo in input a random.normal ed ottengo dei numeri che squeezo")
+        sampled_acc = tf.squeeze( tf.random.normal(shape=[], mean=mean_acc, stddev=stddev_acc) )
+        sampled_dir = tf.squeeze( tf.random.normal( shape=[] ,mean= mean_dir , stddev=stddev_dir) )
+
+        print("sampled_accelleration = ", sampled_acc)
+        print("sampled_direction = ", sampled_dir)
+
+        acc_prob = self.pdf(sampled_acc, mean=mean_acc, sd=stddev_acc)
+        dir_prob = self.pdf(sampled_dir ,mean=mean_dir, sd=stddev_dir )
+
+        print("acc_prob = ", acc_prob)
+        print("dir_prob = ", dir_prob)
+
+        #manca da creare le prob ed i valori in base ai range.. 
+
+        #es di output: [ valore_accellerazione, valore_direzione ], [prob_accellerazione, prob_direzione]
+        return sampled_actions,sampled_probs
+
+
     def choose_action(self, state):
-        mu_values = self.actor(state)
-        action = tf.squeeze(mu_values)
+
+        outputs = self.actor(state)
         v_value = self.critic(state)
 
-        return action,v_value
+        #poi campiono in base alla loro distribuzione.
+        sampled_action,prob_action = self.samplingAction(outputs)
 
+        return sampled_action,prob_action,v_value
 
 
     def remember(self, state, action, reward, value, done):
@@ -222,6 +268,8 @@ class Agent:
         self.memory.summary()
         #..other information will be added later
         #self.actor.summary()
+
+
 
 
 

@@ -1,6 +1,7 @@
-import tracks
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+
+import tracks
 from ppo.Agent import Agent
 
 
@@ -38,7 +39,7 @@ def fromObservationToModelState(observation):
 
 
 if __name__ == '__main__':
-
+    print("tf.version = ",tf.version.VERSION)
     env = tracks.Racer()
 
     state_dim = 5    # we reduce the state dim through observation (see below)
@@ -71,7 +72,12 @@ if __name__ == '__main__':
          score = 0
          while not done:
              state = fromObservationToModelState(observation)
-             action,v_value = agent.choose_action(state)
+             action, probs, v_value = agent.choose_action(state)
+
+             print("action = ",action )
+             print("probs = ", probs)
+             print("v_value = ", v_value)
+
              observation_, reward, done = env.step(action)
              n_steps += 1
              score += reward
