@@ -72,16 +72,12 @@ if __name__ == '__main__':
          score = 0
          while not done:
              state = fromObservationToModelState(observation)
-             action, probs, v_value = agent.choose_action(state)
-
-             print("action = ",action )
-             print("probs = ", probs)
-             print("v_value = ", v_value)
-
+             action, prob, v_value = agent.choose_action(state)
              observation_, reward, done = env.step(action)
              n_steps += 1
              score += reward
-             agent.remember(observation, action, reward,v_value, done)
+             agent.remember(state, action, prob, reward,v_value, done)
+
              if n_steps % N == 0:
                  agent.training(n_epochs= 50)
 
