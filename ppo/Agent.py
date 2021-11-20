@@ -15,11 +15,10 @@ class Memory:
     def __init__(self, chunk_size, gamma=0.99, lam=0.95):
         self.states = []
         self.actions = []
-        self.probs = []
+        self.log_probs = []
         self.rewards = []
         self.values = []
         self.advantages = []
-        self.logprobabilities = []
         self.dones = []
         self.index, self.trajectory_start_index = 0, 0
         self.gamma, self.lam = gamma, lam
@@ -40,20 +39,18 @@ class Memory:
 
         return np.array(self.states), \
                np.array(self.actions), \
-               np.array(self.probs), \
-               np.array(self.values), \
+               np.array(self.log_probs), \
                np.array(self.rewards), \
+               np.array(self.values), \
                np.array(self.advantages), \
-               np.array(self.logprobabilities), \
                np.array(self.dones), \
                batches
 
-    def store_memory(self, state, action, reward, logprob, value, done):
+    def store_memory(self, state, action, log_prob, reward, value, done):
         self.states.append(state)
         self.actions.append(action)
-        # self.probs.append(prob)
+        self.log_probs.append(log_prob)
         self.rewards.append(reward)
-        self.rewards.append(logprob)
         self.values.append(value)
         self.dones.append(done)
         self.index += 1
@@ -62,10 +59,9 @@ class Memory:
         print("clearing memory")
         self.states = []
         self.actions = []
-        self.probs = []
+        self.log_probs = []
         self.rewards = []
         self.advantages = []
-        self.logprobabilities = []
         self.values = []
         self.dones = []
 
@@ -79,7 +75,7 @@ class Memory:
                 self.actions[i]) + ",\n" \
                                    "\t" + str(self.rewards[i]) + ",\n" \
                                                                  "\t" + str(
-                self.values[i]) + ",\n" + "\t" + str(self.dones[
+                self.values[i]) +",\n" +  "\t" + str(self.log_probs[i]) + ",\n" + "\t" + str(self.dones[
                                                          i]) + " ]\n\n"  # mettere tra values e dones: +  "\t" + str(self.advantages[i]) +   ",\n" +  "\t" + str(self.logprobabilities[i])  + ",\n"\
 
         print(sss)
@@ -97,7 +93,7 @@ class Memory:
             self.actions,
             self.advantages,
             self.rewards,
-            self.logprobabilities,
+            self.log_probs
         )
 
     def discounted_cumulative_sums(self, x, discount):
@@ -119,6 +115,20 @@ class Memory:
         self.rewards[path_slice] = self.discounted_cumulative_sums(
             rewards, self.gamma
         )[:-1]
+
+        '''
+        for t in range(len(reward_arr) - 1):
+            discount = 1
+            a_t = 0
+            for k in range(t, len(reward_arr) - 1):
+                a_t += discount * (reward_arr[k] + gamma * vals_arr[k + 1] * (1 - int(dones_arr[k])) - vals_arr[k])
+                discount *= gamma * gae_lambda
+            advantage[t] = a_t
+        # uscito dal ciclo converto values ed advantage corrispettivi in tensori tensorflow nell'esempio
+        advantage = tf.convert_to_tensor(advantage)
+        values = tf.convert_to_tensor(vals_arr)
+        
+        '''
 
         self.trajectory_start_index = self.index
 
@@ -234,10 +244,10 @@ class Agent:
 
     def choose_action(self, state):
         print("STATE IN CHOOSE ACTION = ", state[0])
-        logits = self.actor(state)
+        output = self.actor(state)
         # poi campiono in base alla loro distribuzione.
-        sampled_action, prob_action = self.samplingAction(logits)
-        return sampled_action, prob_action, logits
+        sampled_action, action_log_prob = self.samplingAction(output)
+        return sampled_action, action_log_prob
 
     def remember(self, state, action, prob, reward, value, done):
         self.memory.store_memory(state, action, prob, reward, value, done)
@@ -337,14 +347,14 @@ class Agent:
         print("STATE AFTER EXPAND = ", observation)
         return state
 
-    def logprobabilities(self, logits, a):
-        num_actions = 2
-        # Compute the log-probabilities of taking actions a by using the logits (i.e. the output of the actor)
-        logprobabilities_all = tf.nn.log_softmax(logits)
-        logprobability = tf.reduce_sum(
-            tf.one_hot(a, num_actions) * logprobabilities_all, axis=1
-        )
-        return logprobability
+    # def logprobabilities(self, logits, a):
+    #     num_actions = 2
+    #     # Compute the log-probabilities of taking actions a by using the logits (i.e. the output of the actor)
+    #     logprobabilities_all = tf.nn.log_softmax(logits)
+    #     logprobability = tf.reduce_sum(
+    #         tf.one_hot(a, num_actions) * logprobabilities_all, axis=1
+    #     )
+    #     return logprobability
 
     # Train the policy by maxizing the PPO-Clip objective
     @tf.function
@@ -400,10 +410,7 @@ class Agent:
 
             for t in range(steps_per_epoch):
 
-                # if t != 0:
-                #     state_actual = self.fromObservationToModelState(state_actual)
-
-                action, action_probability, logits = self.choose_action(state_actual)
+                action, action_log_prob = self.choose_action(state_actual)
 
                 print("action= ", action)
                 state_new, reward, done = racer.step(action)
@@ -416,10 +423,10 @@ class Agent:
                 episode_length += 1
 
                 v_value = self.critic(state)
-                logprobability_t = 0 #self.logprobabilities(logits, action)
+
 
                 # in teoria basta state, action, rewprd, value_t, logp_t per il training
-                self.memory.store_memory(state_actual, action, reward, logprobability_t, v_value, done)
+                self.memory.store_memory(state_actual, action, reward, action_log_prob, v_value, done)
 
                 self.memory.summary()
 
