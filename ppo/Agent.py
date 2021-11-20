@@ -7,8 +7,8 @@ import tensorflow as tf
 from numpy import sqrt
 from tensorflow.keras import layers
 from tensorflow.python.training import optimizer
-
-from MicroRacer_Corinaldesi_Fiorilla import tracks
+import tracks
+#from MicroRacer_Corinaldesi_Fiorilla import tracks
 
 
 class Memory:
@@ -69,15 +69,15 @@ class Memory:
     def summary(self):
         sss = ""
         for i in range(len(self.states)):
-            sss += str(i) + " [\n" \
-                            "\t" + str(self.states[i][0]) + ",\n" \
-                                                            "\t" + str(
-                self.actions[i]) + ",\n" \
-                                   "\t" + str(self.rewards[i]) + ",\n" \
-                                                                 "\t" + str(
-                self.values[i]) +",\n" +  "\t" + str(self.log_probs[i]) + ",\n" + "\t" + str(self.dones[
-                                                         i]) + " ]\n\n"  # mettere tra values e dones: +  "\t" + str(self.advantages[i]) +   ",\n" +  "\t" + str(self.logprobabilities[i])  + ",\n"\
+            sss  +=str(i) + " [\n"\
+            "\t" + str(self.states[i][0]) + ",\n"\
+            "\t" + str(self.actions[i]) + ",\n"  \
+            "\t" + str(self.rewards[i]) + ",\n"  \
+            "\t" + str(self.values[i]) +",\n"    \
+            "\t" + str(self.log_probs[i]) + ",\n"\
+            "\t" + str(self.dones[i]) + " ]\n\n"
 
+# mettere tra values e dones: +  "\t" + str(self.advantages[i]) +   ",\n" +  "\t" + str(self.logprobabilities[i])  + ",\n"\
         print(sss)
 
     def get(self):
@@ -100,31 +100,36 @@ class Memory:
         # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
         return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-    def finish_trajectory(self, last_value=0):
+    def calculate_advantages(self, last_value=0):
         # Finish the trajectory by computing advantage estimates and rewards-to-go
         path_slice = slice(self.trajectory_start_index, self.index)
+        # print("path_slice ", path_slice)
+        # print("self.rewards = ",self.rewards)
+        # print("self.rewards[PATH_SLICE] = ", self.rewards[path_slice])
         rewards = np.append(self.rewards[path_slice], last_value)
         values = np.append(self.values[path_slice], last_value)
+        print("rewards", rewards)
+        print("values", values)
 
-        deltas = rewards[:-1] + self.gamma * values[1:] - values[:-1]
+        #è una lista di tutti gli i-delta consiste in una serie di passate dall'elemento i fino alla fine dell'array.
+        deltas = rewards[:-1] + (self.gamma * values[1:]) - values[:-1]
 
         print("DELTAS = ", deltas)
-        self.advantages[path_slice] = self.discounted_cumulative_sums(
-            deltas, self.gamma * self.lam
-        )
-        self.rewards[path_slice] = self.discounted_cumulative_sums(
-            rewards, self.gamma
-        )[:-1]
+
+        self.advantages[path_slice] = self.discounted_cumulative_sums( deltas, self.gamma * self.lam )
+        self.rewards[path_slice] = self.discounted_cumulative_sums( rewards, self.gamma )[:-1]
 
         '''
         for t in range(len(reward_arr) - 1):
             discount = 1
             a_t = 0
             for k in range(t, len(reward_arr) - 1):
-                a_t += discount * (reward_arr[k] + gamma * vals_arr[k + 1] * (1 - int(dones_arr[k])) - vals_arr[k])
+                delta_k = reward_arr[k] + gamma * vals_arr[k + 1] * (1 - int(dones_arr[k])) - vals_arr[k]
+                a_t += discount * (delta_k)
                 discount *= gamma * gae_lambda
             advantage[t] = a_t
         # uscito dal ciclo converto values ed advantage corrispettivi in tensori tensorflow nell'esempio
+        
         advantage = tf.convert_to_tensor(advantage)
         values = tf.convert_to_tensor(vals_arr)
         
@@ -140,21 +145,24 @@ class ActorNet():
 
         # the actor has separate towers for direction and acceleration
         # in this way we can train them separately
-        inputs = layers.Input(shape=(input_dims,))
+
+        train_acc = True
+        train_dir = True
+        inputs = layers.Input(shape=(input_dims))
 
         # acceleration
-        out1 = layers.Dense(256, activation="relu")(inputs)
-        out1 = layers.Dense(256, activation="relu")(out1)
+        out1 = layers.Dense(256, activation="relu",trainable=train_acc)(inputs)
+        out1 = layers.Dense(256, activation="relu",trainable=train_acc)(out1)
         # mu,var of accelleration
-        mu_acc_out = layers.Dense(1, activation='tanh')(out1)
-        var_acc_out = layers.Dense(1, activation='softplus')(out1)
+        mu_acc_out = layers.Dense(1, activation='tanh', trainable=train_acc)(out1)
+        var_acc_out = layers.Dense(1, activation='softplus', trainable=train_acc)(out1)
 
         # direction
-        out2 = layers.Dense(256, activation="relu")(inputs)
-        out2 = layers.Dense(256, activation="relu")(out2)
+        out2 = layers.Dense(256, activation="relu", trainable=train_dir)(inputs)
+        out2 = layers.Dense(256, activation="relu", trainable=train_dir)(out2)
         # mu,var of direction
-        mu_dir_out = layers.Dense(1, activation='tanh')(out2)
-        var_dir_out = layers.Dense(1, activation='softplus')(out1)
+        mu_dir_out = layers.Dense(1, activation='tanh', trainable=train_dir)(out2)
+        var_dir_out = layers.Dense(1, activation='softplus', trainable=train_dir)(out1)
 
         outputs = layers.concatenate([mu_acc_out, var_acc_out, mu_dir_out, var_dir_out])
 
@@ -192,10 +200,11 @@ class CriticNet():
 
 class Agent:
 
-    def __init__(self, state_dimension, alpha=0.0003, chunk_memory_size=5):
+    def __init__(self, state_dimension, alpha=0.0003, chunk_memory_size=5,num_actions=2):
 
         self.alpha = alpha
         self.state_dimension = state_dimension
+        self.num_action = num_actions
         self.policy_learning_rate = 3e-4
         self.value_function_learning_rate = 1e-3
 
@@ -291,18 +300,18 @@ class Agent:
                 old_probs = tf.convert_to_tensor(old_prob_arr[batch])
                 actions = tf.convert_to_tensor(action_arr[batch])
 
+                #self.choose_action( states)
                 outputs = self.actor(states)
                 _, new_probs = self.samplingAction(outputs)
 
                 critic_value = self.critic(states)
                 critic_value = tf.squeeze(critic_value)
 
-                prob_ratio = new_probs.exp() / old_probs.exp()
-                # prob_ratio = (new_probs - old_probs).exp()
-                weighted_probs = advantage[batch] * prob_ratio
+                prob_ratio = (new_probs - old_probs).exp()
 
-                weighted_clipped_probs = tf.clip_by_value((prob_ratio, 1 - self.policy_clip,
-                                                           1 + self.policy_clip) * advantage[batch])
+                weighted_probs = advantage[batch] * prob_ratio
+                weighted_clipped_probs = tf.clip_by_value(
+                    (prob_ratio, 1 - self.policy_clip,1 + self.policy_clip) * advantage[batch])
 
                 actor_loss = -tf.minimum(weighted_probs, weighted_clipped_probs).mean()
 
@@ -311,6 +320,7 @@ class Agent:
                 critic_loss = critic_loss.mean()
 
                 # total_loss = actor_loss + 0.5 * critic_loss
+
                 # grads = tf.GradientTape().gradient(actor_loss, self.actor.trainable_variables)
                 # self.actor.optimizer.apply_gradients(zip(grads, self.actor.trainable_variables))
 
@@ -357,44 +367,58 @@ class Agent:
     #     return logprobability
 
     # Train the policy by maxizing the PPO-Clip objective
-    @tf.function
-    def train_policy(
-            self, observation_buffer, action_buffer, logprobability_buffer, advantage_buffer, clip_ratio = 0.2
-    ):
 
-        # with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
-        #     ratio = tf.exp(
-        #         self.logprobabilities(self.actor(observation_buffer), action_buffer)
-        #         - logprobability_buffer
-        #     )
-        #     min_advantage = tf.where(
-        #         advantage_buffer > 0,
-        #         (1 + clip_ratio) * advantage_buffer,
-        #         (1 - clip_ratio) * advantage_buffer,
-        #     )
-        #
-        #     policy_loss = -tf.reduce_mean(
-        #         tf.minimum(ratio * advantage_buffer, min_advantage)
-        #     )
-        # policy_grads = tape.gradient(policy_loss, self.actor.trainable_variables)
-        # self.policy_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
-        #
-        # kl = tf.reduce_mean(
-        #     logprobability_buffer
-        #     - self.logprobabilities(self.actor(observation_buffer), action_buffer)
-        # )
-        # kl = tf.reduce_sum(kl)
-        kl = 0.020
+    #train_actor makes train_policy
+    @tf.function
+    def train_actor(self, state_buffer, action_buffer, logprobability_buffer, advantage_buffer, clip_ratio = 0.2):
+
+        with tf.GradientTape() as tape:
+            # Record operations for automatic differentiation.
+            # with stmtlet memory free when you leave the block
+
+            old_probs = logprobability_buffer
+            new_probs = tf.TensorArray(size=len(old_probs), dtype='float64')
+            #state_buffer = tf.convert_to_tensor(state_buffer)
+
+            for i in range(len(state_buffer)):
+                print(str("state_buffer["+str(i)+"] = "+str(state_buffer[i])))
+
+            for state in state_buffer:
+                print("\n\nstate ", state)
+                _,prob = self.choose_action(state)
+                new_probs.append(prob)
+
+            print("\n\tnew probs ",new_probs)
+            #_,new_probs = [ self.choose_action(state) for state in state_buffer ]
+
+            prob_ratio = tf.exp( new_probs - old_probs )
+
+            min_advantage= tf.where(
+                 advantage_buffer > 0,
+                 (1 + clip_ratio) * advantage_buffer,
+                 (1 - clip_ratio) * advantage_buffer,
+             )
+
+            policy_loss=-tf.reduce_mean( tf.minimum(prob_ratio * advantage_buffer, min_advantage) )
+
+        policy_grads = tape.gradient(policy_loss, self.actor.trainable_variables)
+        self.policy_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
+
+        kl = tf.reduce_mean( old_probs- new_probs)
+        kl = tf.reduce_sum(kl)
+        print("\nKL returned = ",kl)
+        #kl = 0.020
         return kl
 
     @tf.function
-    def train_value_function(self, observation_buffer, return_buffer):
+    def train_critic(self, state_buffer, return_buffer):
         with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
-            value_loss = tf.reduce_mean((return_buffer - self.critic(observation_buffer)) ** 2)
+            value_loss = tf.reduce_mean((return_buffer - self.critic(state_buffer)) ** 2)
+
         value_grads = tape.gradient(value_loss, self.critic.trainable_variables)
         self.value_optimizer.apply_gradients(zip(value_grads, self.critic.trainable_variables))
 
-    def training2(self, state, racer, n_epochs=2, steps_per_epoch=5, gamma=0.99, alpha=0.0003,
+    def training2(self, state, racer,n_epochs=2, steps_per_epoch=5, gamma=0.99, alpha=0.0003,
                   gae_lambda=0.95,
                   policy_clip=0.2, train_policy_iterations = 3, train_value_iterations = 3, target_kl = 0.01):
 
@@ -422,11 +446,10 @@ class Agent:
                 episode_return += reward
                 episode_length += 1
 
-                v_value = self.critic(state)
-
+                v_value = self.critic(state_actual)
 
                 # in teoria basta state, action, rewprd, value_t, logp_t per il training
-                self.memory.store_memory(state_actual, action, reward, action_log_prob, v_value, done)
+                self.memory.store_memory(state_actual, action,  action_log_prob, reward, v_value, done)
 
                 self.memory.summary()
 
@@ -436,10 +459,12 @@ class Agent:
 
                 # Finish trajectory if reached to a terminal state
                 terminal = done
+
                 if terminal or (t == steps_per_epoch - 1):
                     print("DONE = ", terminal, " t == steps_per_epoch? ", (t == steps_per_epoch - 1))
                     last_value = 0 if done else self.critic(state_actual)
-                    self.memory.finish_trajectory(last_value)
+                    print("reward ====> ",reward)
+                    self.memory.calculate_advantages(last_value)
                     sum_return += episode_return
                     sum_length += episode_length
                     num_episodes += 1
@@ -458,9 +483,62 @@ class Agent:
 
             # Update the policy and implement early stopping using KL divergence
             for _ in range(train_policy_iterations):
-                kl = self.train_policy(
-                    states_buffer, actions_buffer, logprobabilities_buffer, advantages_buffer
-                )
+                clip_ratio =.2
+                #kl = self.train_actor( states_buffer, actions_buffer, logprobabilities_buffer, advantages_buffer )
+                with tf.GradientTape() as tape:
+                    # Record operations for automatic differentiation.
+                    # with stmtlet memory free when you leave the block
+                    old_probs = tf.squeeze(logprobabilities_buffer)
+                    new_probs = []
+                    print("oldprobs => ",old_probs)
+                    print("\n\tnew probs ", new_probs)
+
+                    for state in states_buffer:
+                        _, prob = self.choose_action(state)
+                        new_probs.append(prob)
+
+                    new_probs = tf.squeeze( tf.convert_to_tensor(new_probs))
+
+                    min_advantage = tf.where(
+                        advantages_buffer > 0,
+                        (1 + clip_ratio) * advantages_buffer,
+                        (1 - clip_ratio) * advantages_buffer,
+                    )
+
+                    prob_ratio = tf.math.divide( tf.exp(new_probs) , tf.exp(old_probs) )
+                    print("prob_ratio ", prob_ratio)
+                    prob_ratio_acc, prob_ratio_dir = tf.split(prob_ratio, num_or_size_splits=2, axis=1)
+
+                    print("prob_ratio_acc",prob_ratio_acc)
+                    print("prob_ratio_dir", prob_ratio_dir)
+
+
+                    prob_ratio_acc = tf.squeeze(prob_ratio_acc)
+                    prob_ratio_dir = tf.squeeze(prob_ratio_dir)
+
+                    print("prob_ratio_acc", prob_ratio_acc)
+                    print("prob_ratio_dir", prob_ratio_dir)
+                    advantages_buffer = tf.convert_to_tensor(advantages_buffer, dtype="float32")
+
+                    print("advantages_buffer ", advantages_buffer)
+
+                    policy_loss_acc = -tf.reduce_mean(tf.minimum(prob_ratio_acc * advantages_buffer, tf.cast(min_advantage, tf.float32) ))
+                    policy_loss_dir = -tf.reduce_mean(tf.minimum(prob_ratio_dir * advantages_buffer, min_advantage), tf.cast(min_advantage, tf.float32))
+
+                    print("min_advantage ", min_advantage)
+
+                    print("policy_loss_acc", policy_loss_acc)
+                    print("policy_loss_dir", policy_loss_dir)
+
+                print("self.actor.trainable_variables", self.actor.trainable_variables)
+                policy_grads = tape.gradient(policy_loss, self.actor.trainable_variables)
+                self.policy_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
+                self.actor.trainable_variables
+
+                kl = tf.reduce_mean(old_probs - new_probs)
+                kl = tf.reduce_sum(kl)
+                print("\nKL returned = ", kl)
+
                 if kl > 1.5 * target_kl:
                     # Early Stopping
                     print("EARLY STOPPING: KL= ", kl)
@@ -469,7 +547,7 @@ class Agent:
             # Update the value function
             for _ in range(train_value_iterations):
                 print("TRAINING VALUE FUNCTION")
-              # self.train_value_function(states_buffer, rewards_buffer)
+                self.train_critic(states_buffer, rewards_buffer)
 
             # Print mean return and length for each epoch
             print(" Epoch: ",ep + 1, ". Mean Return: ", sum_return / num_episodes, ". Mean Length: ", sum_length / num_episodes)

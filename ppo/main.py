@@ -1,8 +1,12 @@
 import numpy as np
 import tensorflow as tf
+import tracks
+from ppo.Agent import Agent
 
-from MicroRacer_Corinaldesi_Fiorilla import tracks
-from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent import Agent
+tf.compat.v1.enable_eager_execution()
+
+#from MicroRacer_Corinaldesi_Fiorilla import tracks
+#from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent import Agent
 
 
 def max_lidar(observation, angle=np.pi / 3, pins=19):
@@ -35,15 +39,18 @@ def fromObservationToModelState(observation):
 
 
 if __name__ == '__main__':
+
     print("tf.version = ", tf.version.VERSION)
+
     env = tracks.Racer()
 
     state_dim = 5  # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
     chunk_memory_size = 50
 
-    agent = Agent(state_dimension=state_dim, chunk_memory_size=10)
+    agent = Agent(state_dimension=state_dim, chunk_memory_size=10, num_actions = num_actions)
     done = False
+
     # observation = env.reset() #prima osservazione
     # state = fromObservationToModelState(observation)
     # print("state in input of the net is ", state)
@@ -58,6 +65,7 @@ if __name__ == '__main__':
     # print("done ", done)
     #
     # agent.remember(observation, action, reward, done)
+
     n_races = 1
     N = 20;
     n_steps = 0  # conto gli step per fermarmi ogni N
