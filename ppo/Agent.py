@@ -226,11 +226,11 @@ class Agent:
         acc_prob = self.pdf(acc_sample, mean=mean_acc, sd=stddev_acc)
         dir_prob = self.pdf(dir_sample, mean=mean_dir, sd=stddev_dir)
 
-        sampled_probs = acc_prob, dir_prob
+        sampled_log_probs = np.log(acc_prob), np.log(dir_prob)
 
         # es di output: [ valore_accellerazione, valore_direzione ], [prob_accellerazione, prob_direzione]
         return tf.convert_to_tensor(sampled_actions, dtype="float32"), \
-               tf.convert_to_tensor(sampled_probs, dtype="float32")
+               tf.convert_to_tensor(sampled_log_probs, dtype="float32")
 
     def choose_action(self, state):
         print("STATE IN CHOOSE ACTION = ", state[0])
@@ -299,8 +299,8 @@ class Agent:
                 returns = advantage[batch] + values[batch]
                 critic_loss = (returns - critic_value) ** 2
                 critic_loss = critic_loss.mean()
-                # total_loss = actor_loss + 0.5 * critic_loss
 
+                # total_loss = actor_loss + 0.5 * critic_loss
                 # grads = tf.GradientTape().gradient(actor_loss, self.actor.trainable_variables)
                 # self.actor.optimizer.apply_gradients(zip(grads, self.actor.trainable_variables))
 
@@ -416,7 +416,7 @@ class Agent:
                 episode_length += 1
 
                 v_value = self.critic(state)
-                logprobability_t = 0#self.logprobabilities(logits, action)
+                logprobability_t = 0 #self.logprobabilities(logits, action)
 
                 # in teoria basta state, action, rewprd, value_t, logp_t per il training
                 self.memory.store_memory(state_actual, action, reward, logprobability_t, v_value, done)
