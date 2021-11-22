@@ -5,7 +5,6 @@ from ppo.Agent2 import Agent2
 from tensorflow import keras
 from tensorflow.keras import layers
 
-tf.compat.v1.enable_eager_execution()
 
 #from MicroRacer_Corinaldesi_Fiorilla import tracks
 #from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent import Agent
@@ -87,72 +86,19 @@ def training2(self, state, racer, n_epochs=2, steps_per_epoch=5, gamma=0.99, alp
                     state_actual, episode_return, episode_length = racer.reset(), 0, 0
                     state_actual = self.fromObservationToModelState(state_actual)
 
-            # Get values from the buffer
-            states_buffer, actions_buffer,advantages_buffer,rewards_buffer, logprobabilities_buffer = self.memory.get()
-            print("len states = ",len(states_buffer) )
 
-            # Update the policy and implement early stopping using KL divergence
-            for _ in range(train_policy_iterations):
-                print("TRAINING ACTORNET ", str(_))
-                old_probs = tf.squeeze(logprobabilities_buffer)
-                advantages_buffer = tf.convert_to_tensor(advantages_buffer, dtype="float32")
-                new_probs = []
-                for state in states_buffer:
-                    _, new_prob = self.choose_action(state)
-                    new_probs.append(new_prob)
-                new_probs = tf.convert_to_tensor(new_probs)
-
-                with tf.GradientTape(persistent=True) as tape:
-                    tape.watch(old_probs)
-                    tape.watch(advantages_buffer)
-                    tape.watch(new_probs)
-                    # forward : make a prediction and then compute the loss.
-                    # compute loss
-                    prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
-
-                    min_advantage = tf.cast(tf.where(
-                        advantages_buffer > 0,
-                        (1+.2) * advantages_buffer,
-                        (1-.2) * advantages_buffer,
-                    ), tf.float32)
-                    print("prob ration = ", prob_ratio)
-                    print("advantages_buffer = ", advantages_buffer)
-                    print("min_advantage = ", min_advantage)
-                    loss = -tf.reduce_mean(tf.minimum(prob_ratio * advantages_buffer, min_advantage))
-
-                grads = tape.gradient(target=loss, sources=self.actor.model.trainable_variables)
-                a = zip(grads, self.actor.model.trainable_variables)
-                print("zip len", len(list(a) ))
-                self.actor.optimizer.apply_gradients(a)
-
-
-            # Update the value function
-            for _ in range(train_value_iterations):
-                print("TRAINING Critic Net ",str(_))
-                new_vals = []
-                for state in states_buffer:
-                    new_vals.append(self.critic.model(state) )
-                new_vals = tf.convert_to_tensor(new_vals)
-
-                with tf.GradientTape(persistent=True) as tape:  # Record operations for automatic differentiation.
-                    tape.watch(new_vals)
-                    value_loss = tf.reduce_mean((rewards_buffer - new_vals) ** 2)
-
-                value_grads = tape.gradient(value_loss, self.critic.model.trainable_variables)
-                b = zip(value_grads, self.critic.model.trainable_variables)
-                print("zip len", len(list(b)))
-                self.critic.optimizer.apply_gradients(b)
-
-            # Print mean return and length for each epoch
-            print(" Epoch: ",ep + 1, ". Mean Return: ", sum_return / num_episodes, ". Mean Length: ", sum_length / num_episodes)
-            self.memory.clear_memory()
 
 
 def new_race():
-    pass
+    print("\n\nNEW RACE ")
 
 
 def training(agent, env):
+    gamma = 0.99
+    alpha = 0.0003
+    gae_lambda = 0.95,
+    policy_clip = 0.2,
+
     ##initialization
     n_epochs,steps_per_epoch = 2, 5
     train_policy_iterations, train_value_iterations = 1,1
@@ -164,15 +110,17 @@ def training(agent, env):
         sum_length = 0
         num_episodes=0
         length_episodes=0
+        episode_return = 0
+        episode_length=0
         current_state = state
 
         for t in range(steps_per_epoch):
 
             action, action_log_prob = agent.choose_action(current_state)
             v_value = agent.critic.model(current_state)
-            new_observation, reward, done = env.step(action)
+            observation, reward, done = env.step(action)
 
-            print("new_observation ", new_observation)
+            print("observation ", observation)
             print("reward ", reward)
             print("done ", done)
 
@@ -184,7 +132,7 @@ def training(agent, env):
             #agent.summary()
 
             # Update the state
-            current_state = fromObservationToModelState(new_observation)
+            current_state = fromObservationToModelState(observation)
 
             # Finish trajectory if reached to a terminal state
             terminal = done
@@ -194,22 +142,24 @@ def training(agent, env):
                 last_value = 0 if done else agent.critic.model(current_state)
                 print("reward ====> ", reward)
 
-                agent.calculate_advantages(last_value)
+                agent.calculate_advantages(last_value, gamma = 0.99,lam = 0.95)
 
                 sum_return += episode_return
                 sum_length += episode_length
                 num_episodes += 1
                 print("NUM_EPISODES INCREMENTED: ", num_episodes)
-                state_actual, episode_return, episode_length = env.reset(), 0, 0
-                state_actual = fromObservationToModelState(state_actual)
+                observation, episode_return, episode_length = env.reset(), 0, 0
+                current_state = fromObservationToModelState(observation)
 
+            agent.learn(train_policy_iterations, train_value_iterations)
 
         print(" Epoch: ",ep + 1, ". Mean Return: ", sum_return / num_episodes, ". Mean Length: ", sum_length / num_episodes)
 
 
 
 if __name__ == '__main__':
-
+    #tf.compat.v1.enable_eager_execution()
+    tf.executing_eagerly()
     print("tf.version = ", tf.version.VERSION)
 
     env = tracks.Racer()

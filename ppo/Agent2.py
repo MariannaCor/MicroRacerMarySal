@@ -10,7 +10,7 @@ from tensorflow.keras import layers
 
 
 class Memory:
-    def __init__(self, chunk_size, gamma=0.99, lam=0.95):
+    def __init__(self, chunk_size):
         self.states = []
         self.actions = []
         self.log_probs = []
@@ -18,8 +18,8 @@ class Memory:
         self.values = []
         self.advantages = []
         self.dones = []
-        self.index, self.trajectory_start_index = 0, 0
-        self.gamma, self.lam = gamma, lam
+        self.index = 0
+        self.trajectory_start_index = 0;
         self.chunk_size = chunk_size
 
     def generate_batches(self):
@@ -91,8 +91,6 @@ class Memory:
             self.rewards,
             self.log_probs
         )
-
-
 
 class ActorNet():
 
@@ -355,35 +353,78 @@ class Agent2:
             # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
             return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-    def calculate_advantages(self, last_value=0):
+    def calculate_advantages(self, last_value=0, gamma=0.99, lam=0.95):
         # Finish the trajectory by computing advantage estimates and rewards-to-go
-        path_slice = slice(self.trajectory_start_index, self.index)
-        rewards = np.append(self.rewards[path_slice], last_value)
-        values = np.append(self.values[path_slice], last_value)
+        path_slice = slice(self.memory.trajectory_start_index, self.memory.index)
+        rewards = np.append(self.memory.rewards[path_slice], last_value)
+        values = np.append(self.memory.values[path_slice], last_value)
         print("rewards", rewards)
         print("values", values)
-
         # è una lista di tutti gli i-delta consiste in una serie di passate dall'elemento i fino alla fine dell'array.
-        deltas = rewards[:-1] + (self.gamma * values[1:]) - values[:-1]
-
+        deltas = rewards[:-1] + (gamma * values[1:]) - values[:-1]
         print("DELTAS = ", deltas)
+        self.memory.advantages[path_slice] = self.discounted_cumulative_sums(deltas, gamma * lam)
+        self.memory.rewards[path_slice] = self.discounted_cumulative_sums(rewards, gamma)[:-1]
 
-        self.advantages[path_slice] = self.discounted_cumulative_sums(deltas, self.gamma * self.lam)
-        self.rewards[path_slice] = self.discounted_cumulative_sums(rewards, self.gamma)[:-1]
+        self.memory.trajectory_start_index = self.memory.index
 
-        '''
-        for t in range(len(reward_arr) - 1):
-            discount = 1
-            a_t = 0
-            for k in range(t, len(reward_arr) - 1):
-                delta_k = reward_arr[k] + gamma * vals_arr[k + 1] * (1 - int(dones_arr[k])) - vals_arr[k]
-                a_t += discount * (delta_k)
-                discount *= gamma * gae_lambda
-            advantage[t] = a_t
-        # uscito dal ciclo converto values ed advantage corrispettivi in tensori tensorflow nell'esempio
+    def discounted_cumulative_sums(self, x, discount):
+        # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
+        return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-        advantage = tf.convert_to_tensor(advantage)
-        values = tf.convert_to_tensor(vals_arr)
-        '''
+    def learn(self,train_policy_iterations, train_value_iterations):
 
-        self.trajectory_start_index = self.index
+        # Get values from the buffer
+        states_buffer, actions_buffer, advantages_buffer, rewards_buffer, logprobabilities_buffer = self.memory.get()
+        print("number of states in memory = ", len(states_buffer))
+
+        # Update the policy_actor_network for a number of iterations
+        for _ in range(train_policy_iterations):
+            print("TRAINING ACTORNET ", str(int(_)+1))
+            old_probs = tf.squeeze(logprobabilities_buffer)
+            advantages_buffer = tf.convert_to_tensor(advantages_buffer, dtype="float32")
+            new_probs = []
+            for state in states_buffer:
+                _, new_prob = self.choose_action(state)
+                new_probs.append(new_prob)
+            new_probs = tf.convert_to_tensor(new_probs)
+
+            print("advantages_buffer = ", advantages_buffer)
+
+            with tf.GradientTape(persistent=True) as tape:
+                tape.watch(old_probs)
+                tape.watch(advantages_buffer)
+                tape.watch(new_probs)
+                # forward : make a prediction and then compute the loss.
+                # compute loss
+                prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
+
+                min_advantage = tf.cast(tf.where(
+                    advantages_buffer > 0,
+                    (1 + .2) * advantages_buffer,
+                    (1 - .2) * advantages_buffer,
+                ), tf.float32)
+
+                loss = -tf.reduce_mean(tf.minimum(prob_ratio * advantages_buffer, min_advantage))
+
+            grads = tape.gradient(target=loss, sources=self.actor.model.trainable_variables)
+            update = zip(grads, self.actor.model.trainable_variables)
+            self.actor.optimizer.apply_gradients(list(update))
+
+        # Update the value_critic net for a number of iterations
+        for _ in range(train_value_iterations):
+            print("TRAINING Critic Net ", str(int(_)+1))
+            new_vals = []
+            for state in states_buffer:
+                new_vals.append(self.critic.model(state))
+            new_vals = tf.convert_to_tensor(new_vals)
+
+            with tf.GradientTape(persistent=True) as tape:  # Record operations for automatic differentiation.
+                tape.watch(new_vals)
+                value_loss = tf.reduce_mean((rewards_buffer - new_vals) ** 2)
+
+            value_grads = tape.gradient(value_loss, self.critic.model.trainable_variables)
+            update = zip(value_grads, self.critic.model.trainable_variables)
+            self.critic.optimizer.apply_gradients(list(update))
+
+        self.memory.clear_memory()
