@@ -18,8 +18,9 @@ class Memory:
         self.values = []
         self.advantages = []
         self.dones = []
-        self.index = 0
-        self.trajectory_start_index = 0;
+
+        self.index, self.trajectory_start_index = 0, 0
+
         self.chunk_size = chunk_size
 
     def generate_batches(self):
@@ -101,9 +102,10 @@ class ActorNet():
 
         train_acc = True
         train_dir = True
-        inputs = layers.Input(shape=(input_dims,))
 
+        inputs = keras.Input(shape=(input_dims,),dtype=tf.float32)
         # acceleration
+
         out1 = layers.Dense(256, activation="relu",trainable=train_acc)(inputs)
         out1 = layers.Dense(256, activation="relu",trainable=train_acc)(out1)
         # mu,var of accelleration
@@ -142,6 +144,8 @@ class CriticNet():
     def save_checkpoint(self): None
 
     def load_checkpoint(self): None
+
+
 
 
 class Agent2:
@@ -207,34 +211,32 @@ class Agent2:
     #     self.actor.load_checkpoint()
     #     self.critic.load_checkpoint()
 
-    def max_lidar(self, observation, angle=np.pi / 3, pins=19):
-        arg = np.argmax(observation)
-        dir = -angle / 2 + arg * (angle / (pins - 1))
-        dist = observation[arg]
-        if arg == 0:
-            distl = dist
-        else:
-            distl = observation[arg - 1]
-        if arg == pins - 1:
-            distr = dist
-        else:
-            distr = observation[arg + 1]
-        return dir, (distl, dist, distr)
-
-    def observe(self, racer_state):
-        if racer_state is None:
-            return np.array([0])  # not used; we could return None
-        else:
-            lidar_signal, v = racer_state
-            dir, (distl, dist, distr) = self.max_lidar(lidar_signal)
-            return np.array([dir, distl, dist, distr, v])
-
-    def fromObservationToModelState(self, observation):
-        state = self.observe(observation)
-        state = tf.expand_dims(state, 0)
-        return state
-
-
+    # def max_lidar(self, observation, angle=np.pi / 3, pins=19):
+    #     arg = np.argmax(observation)
+    #     dir = -angle / 2 + arg * (angle / (pins - 1))
+    #     dist = observation[arg]
+    #     if arg == 0:
+    #         distl = dist
+    #     else:
+    #         distl = observation[arg - 1]
+    #     if arg == pins - 1:
+    #         distr = dist
+    #     else:
+    #         distr = observation[arg + 1]
+    #     return dir, (distl, dist, distr)
+    #
+    # def observe(self, racer_state):
+    #     if racer_state is None:
+    #         return np.array([0])  # not used; we could return None
+    #     else:
+    #         lidar_signal, v = racer_state
+    #         dir, (distl, dist, distr) = self.max_lidar(lidar_signal)
+    #         return np.array([dir, distl, dist, distr, v])
+    #
+    # def fromObservationToModelState(self, observation):
+    #     state = self.observe(observation)
+    #     state = tf.expand_dims(state, 0)
+    #     return state
     def training2(self, state, racer, n_epochs=2, steps_per_epoch=5, gamma=0.99, alpha=0.0003, gae_lambda=0.95,
                   policy_clip=0.2, train_policy_iterations = 1, train_value_iterations = 3, target_kl = 0.01,
                   ):
@@ -321,7 +323,6 @@ class Agent2:
                 print("zip len", len(list(a) ))
                 self.actor.optimizer.apply_gradients(a)
 
-
             # Update the value function
             for _ in range(train_value_iterations):
                 print("TRAINING Critic Net ",str(_))
@@ -354,62 +355,97 @@ class Agent2:
             return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
     def calculate_advantages(self, last_value=0, gamma=0.99, lam=0.95):
-        # Finish the trajectory by computing advantage estimates and rewards-to-go
-        path_slice = slice(self.memory.trajectory_start_index, self.memory.index)
-        rewards = np.append(self.memory.rewards[path_slice], last_value)
-        values = np.append(self.memory.values[path_slice], last_value)
-        print("rewards", rewards)
-        print("values", values)
-        # è una lista di tutti gli i-delta consiste in una serie di passate dall'elemento i fino alla fine dell'array.
-        deltas = rewards[:-1] + (gamma * values[1:]) - values[:-1]
-        print("DELTAS = ", deltas)
-        self.memory.advantages[path_slice] = self.discounted_cumulative_sums(deltas, gamma * lam)
-        self.memory.rewards[path_slice] = self.discounted_cumulative_sums(rewards, gamma)[:-1]
+            # Finish the trajectory by computing advantage estimates and rewards-to-go
+            path_slice = slice(self.memory.trajectory_start_index, self.memory.index)
+            rewards = np.append(self.memory.rewards[path_slice], last_value)
+            values = np.append(self.memory.values[path_slice], last_value)
+            print("rewards", rewards)
+            print("values", values)
+            # è una lista di tutti gli delta-i consiste in una serie di passate dall'elemento i fino alla fine dell'array.
+            deltas = rewards[:-1] + (gamma * values[1:]) - values[:-1]
+            #print("DELTAS = ", deltas)
+            self.memory.advantages[path_slice] = self.discounted_cumulative_sums(deltas, gamma * lam)
+            self.memory.rewards[path_slice] = self.discounted_cumulative_sums(rewards, gamma)[:-1]
+            self.memory.memortrajectory_start_index = self.memory.index
 
-        self.memory.trajectory_start_index = self.memory.index
 
     def discounted_cumulative_sums(self, x, discount):
         # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
         return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-    def learn(self,train_policy_iterations, train_value_iterations):
-
+    def learn(self,train_policy_iterations=3, train_value_iterations=3):
         # Get values from the buffer
         states_buffer, actions_buffer, advantages_buffer, rewards_buffer, logprobabilities_buffer = self.memory.get()
         print("number of states in memory = ", len(states_buffer))
 
-        # Update the policy_actor_network for a number of iterations
-        for _ in range(train_policy_iterations):
-            print("TRAINING ACTORNET ", str(int(_)+1))
-            old_probs = tf.squeeze(logprobabilities_buffer)
-            advantages_buffer = tf.convert_to_tensor(advantages_buffer, dtype="float32")
-            new_probs = []
-            for state in states_buffer:
-                _, new_prob = self.choose_action(state)
-                new_probs.append(new_prob)
-            new_probs = tf.convert_to_tensor(new_probs)
+        old_probs = tf.constant(tf.squeeze(logprobabilities_buffer))
+        advantages_buffer = tf.constant(advantages_buffer)
+        with tf.GradientTape(persistent=True) as tape:
+            tape.watch(states_buffer)
+            tape.watch(old_probs)
+            tape.watch(advantages_buffer)
+            p_ratio= tf.convert_to_tensor(0, dtype="float32")
+            final_loss = tf.convert_to_tensor(0, dtype='float32')
+            for i in range(len(states_buffer)-1):
+                state = states_buffer[i]
+                print("state = ",state)
+                #forward
+                _, new_p = self.choose_action(state)
+                old_p = tf.squeeze(old_probs[i])
+                new_ratio = tf.exp(new_p - old_p)
+                print("p_ratio ",p_ratio)
+                print("new_ratio ", new_ratio)
 
-            print("advantages_buffer = ", advantages_buffer)
-
-            with tf.GradientTape(persistent=True) as tape:
-                tape.watch(old_probs)
-                tape.watch(advantages_buffer)
-                tape.watch(new_probs)
-                # forward : make a prediction and then compute the loss.
-                # compute loss
-                prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
-
+                #questo nuovo razio deve fare media con il precedente.
+                p_ratio = (p_ratio + new_ratio)/ 2 #hence make the mean as iteration during computation of the for.
+                print("p_ration", p_ratio)
+                a_t = tf.cast(advantages_buffer[i], tf.float32)
                 min_advantage = tf.cast(tf.where(
-                    advantages_buffer > 0,
-                    (1 + .2) * advantages_buffer,
-                    (1 - .2) * advantages_buffer,
+                    a_t > 0,
+                    (1 + .2) * a_t,
+                    (1 - .2) * a_t,
                 ), tf.float32)
+                print("min_advantage", min_advantage)
+                print("advantages_buffer[i]", a_t)
+                loss = -1 * tf.minimum( p_ratio * a_t, min_advantage)
+                print("loss ",loss)
+                final_loss = ((final_loss + loss )/ 2)
+        print("final_loss = ",final_loss)
+        grads = tape.gradient(target=loss, sources=self.actor.model.trainable_variables)
+        print("grads =", grads)
+        self.actor.optimizer.apply_gradients(zip(grads, self.actor.model.trainable_variables))
 
-                loss = -tf.reduce_mean(tf.minimum(prob_ratio * advantages_buffer, min_advantage))
-
-            grads = tape.gradient(target=loss, sources=self.actor.model.trainable_variables)
-            update = zip(grads, self.actor.model.trainable_variables)
-            self.actor.optimizer.apply_gradients(list(update))
+        # Update the policy_actor_network for a number of iterations
+        # for _ in range(train_policy_iterations):
+        #     print("TRAINING ACTORNET ", str(int(_)+1))
+        #     old_probs = tf.squeeze(logprobabilities_buffer)
+        #     advantages_buffer = tf.convert_to_tensor(advantages_buffer, dtype="float32")
+        #     new_probs = []
+        #     for state in states_buffer:
+        #         _, new_prob = self.choose_action(state)
+        #         new_probs.append(new_prob)
+        #         new_probs = tf.convert_to_tensor(new_probs)
+        #
+        #     with tf.GradientTape(persistent=False) as tape:
+        #         #devo calcolare al volo le new_probs e poi fare al volo il loss.
+        #         # compute loss
+        #         prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
+        #         tape.watch(prob_ratio)
+        #
+        #         min_advantage = tf.cast(tf.where(
+        #             advantages_buffer > 0,
+        #             (1 + .2) * advantages_buffer,
+        #             (1 - .2) * advantages_buffer,
+        #         ), tf.float32)
+        #         tape.watch(min_advantage)
+        #         loss = -tf.reduce_mean(tf.minimum(prob_ratio * advantages_buffer, min_advantage))
+        #         tape.watch(loss)
+        #     print("loss => ",loss)
+        #     grads = tape.gradient(target=loss, sources=self.actor.model.trainable_variables)
+        #     print("grads =",grads)
+        #     update = zip(grads, self.actor.model.trainable_variables)
+        #     update = list(update)
+        #     self.actor.optimizer.apply_gradients(update)
 
         # Update the value_critic net for a number of iterations
         for _ in range(train_value_iterations):
@@ -420,11 +456,110 @@ class Agent2:
             new_vals = tf.convert_to_tensor(new_vals)
 
             with tf.GradientTape(persistent=True) as tape:  # Record operations for automatic differentiation.
+
                 tape.watch(new_vals)
                 value_loss = tf.reduce_mean((rewards_buffer - new_vals) ** 2)
-
+                tape.watch(value_loss)
+            print("tape.watched_variables() ==", tape.watched_variables())
             value_grads = tape.gradient(value_loss, self.critic.model.trainable_variables)
             update = zip(value_grads, self.critic.model.trainable_variables)
-            self.critic.optimizer.apply_gradients(list(update))
+            update = list(update)
+            self.critic.optimizer.apply_gradients(update)
 
         self.memory.clear_memory()
+
+    def learn2(self, train_policy_iterations=3, train_value_iterations=3):
+
+
+        states_buffer, actions_buffer, advantages_buffer, rewards_buffer, logprobabilities_buffer = self.memory.get()
+        print("number of states in memory = ", len(states_buffer))
+
+
+        # Update the policy and implement early stopping using KL divergence
+        target_kl = 0.01
+        for iteration in range(train_policy_iterations):
+           kl = self.train_policy( states_buffer, logprobabilities_buffer, advantages_buffer )
+           if kl > 1.5 * target_kl:
+               # Early Stopping
+               break
+
+        for iteration in range(train_value_iterations):
+            self.train_value_function(states_buffer, rewards_buffer)
+
+    # Train the value function by regression on mean-squared error
+    @tf.function
+    def train_value_function(self,states_buffer, rewards_buffer ):
+        with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
+            value_loss = tf.reduce_mean((rewards_buffer - self.critic.model(states_buffer)) ** 2)
+
+        value_grads = tape.gradient(value_loss, self.critic.model.trainable_variables)
+        self.critic.optimizer.apply_gradients(zip(value_grads, self.critic.model.trainable_variables))
+
+    @tf.function
+    def train_policy(self, states_buffer, log_probs_buffer, advantages_buffer ):
+        with tf.GradientTape() as tape:  # Record operations for automatic differentiation.
+            ratio = tf.exp(
+                self.get_logprobs(states_buffer)
+                - log_probs_buffer
+            )
+            min_advantage = tf.where(
+                advantages_buffer > 0,
+                (1 + .2) * advantages_buffer,
+                (1 - .2) * advantages_buffer,
+            )
+
+            policy_loss = -tf.reduce_mean(
+                tf.minimum(ratio * advantages_buffer, min_advantage)
+            )
+
+        policy_grads = tape.gradient(policy_loss, self.actor.trainable_variables)
+        self.actor.optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
+
+        kl = tf.reduce_mean(
+            log_probs_buffer
+            - self.get_logprobs(states_buffer)
+        )
+
+        kl = tf.reduce_sum(kl)
+        return kl
+
+    def get_logprobs(self, states_buffer ):
+        # Compute the log-probabilities of taking actions a by using the logits (i.e. the output of the actor)
+        newProbs = []
+        for state in states_buffer:
+            _,prob = self.samplingAction(state)
+            newProbs.append(prob)
+
+        return tf.convert_to_tensor(newProbs, dtype="float32")
+        #tf.one_hot(a, num_actions) questo comando crea una matrice numactions+numactions e mette il valore di 1 negli indici corrispondenti.
+        #quindi è una matrice normalizzata in pratica a 0 ed 1 delle prob che moltiplico per un altra delle log probabilities... quindi ?!
+
+        #log_prob = tf.reduce_sum(logprobabilities_all, axis=1) #non tiene conto delle azioni intraprese..
+
+       # return log_prob
+    #    for i in range(len(states_buffer)):
+    #        #per ogni stato computo un passo del gradiente.
+    #        #mi prendo le nuove variabili che diventano costanti.
+    #        state = tf.constant(states_buffer[i])
+    #        old_prob = tf.constant(tf.squeeze(logprobabilities_buffer[i]))
+    #        advantage = tf.cast(advantages_buffer[i], tf.float32)
+    #        ratio_accumulator = tf.costant([])
+    #        loss_accumulator = tf.costant([])
+    #        grads = self.calculate_gradients(state= state, old_prob= old_prob,advantage= advantage, ratio_accumulator = ratio_accumulator,loss_accumulator= loss_accumulator)
+    #        self.actor.optimizer.apply_gradients(zip(grads, self.actor.trainable_variables))
+    #
+    # def calculate_gradients(self, state, old_prob, advantage, ratio_accumulator, loss_accumulator):
+    #
+    #     with tf.GradientTape() as tape:
+    #         _,new_prob = self.actor.model(state)
+    #         loss_value = self.calculate_loss(new_prob= new_prob,old_prob = old_prob,advantage= advantage)
+    #     return tape.gradient(loss_value, self.actor.trainable_variables)
+    #
+    # def calculate_loss(self, new_prob, old_prob, advantage):
+    #     prob_ratio = tf.exp(new_prob - old_prob)
+    #     min_advantage = tf.cast(tf.where(
+    #         advantage > 0,
+    #         (1 + .2) * advantage,
+    #         (1 - .2) * advantage,
+    #     ), tf.float32)
+    #     return -1 * tf.minimum(prob_ratio * advantage, min_advantage)

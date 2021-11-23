@@ -148,7 +148,7 @@ def training(agent, env):
                 current_state = fromObservationToModelState(observation)
 
 
-        agent.learn(train_policy_iterations, train_value_iterations)
+        agent.learn2(train_policy_iterations, train_value_iterations)
 
         print(" Epoch: ",ep + 1, ". Mean Return: ", sum_return / num_episodes, ". Mean Length: ", sum_length / num_episodes)
 
