@@ -101,7 +101,7 @@ def training(agent, env):
 
     ##initialization
     n_epochs,steps_per_epoch = 2, 5
-    train_policy_iterations, train_value_iterations = 1,1
+    train_policy_iterations, train_value_iterations = 3,3
     observation = env.reset()
     state = fromObservationToModelState(observation)
 
@@ -117,23 +117,19 @@ def training(agent, env):
         for t in range(steps_per_epoch):
 
             action, action_log_prob = agent.choose_action(current_state)
-            v_value = agent.critic.model(current_state)
             observation, reward, done = env.step(action)
+            v_value = agent.critic.model(current_state)
 
             print("observation ", observation)
             print("reward ", reward)
             print("done ", done)
-
             episode_return += reward
             episode_length += 1
-
-            # in teoria basta state, action, action_log_prob, reward, value_t
+            # in teoria bastano state, action_log_prob, reward, value_t
             agent.remember(current_state, action, action_log_prob, reward, v_value, done)
             #agent.summary()
-
-            # Update the state
+            # model te new observation we got to the current_state
             current_state = fromObservationToModelState(observation)
-
             # Finish trajectory if reached to a terminal state
             terminal = done
 
@@ -151,7 +147,8 @@ def training(agent, env):
                 observation, episode_return, episode_length = env.reset(), 0, 0
                 current_state = fromObservationToModelState(observation)
 
-            agent.learn(train_policy_iterations, train_value_iterations)
+
+        agent.learn(train_policy_iterations, train_value_iterations)
 
         print(" Epoch: ",ep + 1, ". Mean Return: ", sum_return / num_episodes, ". Mean Length: ", sum_length / num_episodes)
 
@@ -159,7 +156,7 @@ def training(agent, env):
 
 if __name__ == '__main__':
     #tf.compat.v1.enable_eager_execution()
-    tf.executing_eagerly()
+    #tf.executing_eagerly()
     print("tf.version = ", tf.version.VERSION)
 
     env = tracks.Racer()

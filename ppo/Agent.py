@@ -5,6 +5,7 @@ import scipy.stats as stats
 import scipy.signal
 import tensorflow as tf
 from numpy import sqrt
+from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.python.training import optimizer
 import tracks
@@ -166,11 +167,10 @@ class ActorNet():
 
         outputs = layers.concatenate([mu_acc_out, var_acc_out, mu_dir_out, var_dir_out])
 
-        self.model = tf.keras.Model(inputs, outputs, name="ActorNet")
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+        self.model = keras.Model(inputs, outputs, name="ActorNet")
+        self.optimizer = keras.optimizers.Adam(learning_rate=lr)
 
-    def getModel(self):
-        return self.model
+    #def __call__(self): self.model
 
     def save_checkpoint(self): None
 
@@ -187,8 +187,8 @@ class CriticNet():
         out = layers.Dense(64, activation="relu")(out)
         outputs = layers.Dense(1, activation="relu")(out)
 
-        self.model = tf.keras.Model(inputs, outputs, name="CriticNet")
-        self.optimizer = tf.optimizers.Adam(learning_rate=lr)
+        self.model = keras.Model(inputs, outputs, name="CriticNet")
+        self.optimizer = keras.optimizers.Adam(learning_rate=lr)
 
     def save_checkpoint(self): None
 
@@ -196,6 +196,8 @@ class CriticNet():
 
     def getModel(self):
         return self.model
+
+    #def __call__(self): self.model
 
 
 class Agent:
@@ -209,11 +211,11 @@ class Agent:
         self.value_function_learning_rate = 1e-3
 
         self.memory = Memory(chunk_memory_size)
-        self.actor = ActorNet(input_dims=state_dimension, lr=alpha).getModel()
-        self.critic = CriticNet(input_dims=state_dimension, lr=alpha).getModel()
+        self.actor = ActorNet(input_dims=state_dimension, lr=alpha)
+        self.critic = CriticNet(input_dims=state_dimension, lr=alpha)
 
-        self.policy_optimizer = tf.optimizers.Adam(learning_rate=self.policy_learning_rate)
-        self.value_optimizer = tf.optimizers.Adam(learning_rate=self.value_function_learning_rate)
+        #self.policy_optimizer = keras.optimizers.Adam(learning_rate=self.policy_learning_rate)
+        #self.value_optimizer = keras.optimizers.Adam(learning_rate=self.value_function_learning_rate)
 
     # def pdfv2(self, guess, mean, sd):return (np.pi * sd) * np.exp(-0.5 * ((guess - mean) / sd) ** 2)
 
@@ -253,7 +255,7 @@ class Agent:
 
     def choose_action(self, state):
         print("STATE IN CHOOSE ACTION = ", state[0])
-        output = self.actor(state)
+        output = self.actor.model(state)
         # poi campiono in base alla loro distribuzione.
         sampled_action, action_log_prob = self.samplingAction(output)
         return sampled_action, action_log_prob
@@ -351,10 +353,10 @@ class Agent:
 
     def fromObservationToModelState(self, observation):
         state = self.observe(observation)
-        print("OBSERVATION = ", observation)
-        print("STATE BEFORE EXPAND = ", state)
+       # print("OBSERVATION = ", observation)
+       # print("STATE BEFORE EXPAND = ", state)
         state = tf.expand_dims(state, 0)
-        print("STATE AFTER EXPAND = ", observation)
+       # print("STATE AFTER EXPAND = ", observation)
         return state
 
     # def logprobabilities(self, logits, a):
@@ -402,7 +404,8 @@ class Agent:
             policy_loss=-tf.reduce_mean( tf.minimum(prob_ratio * advantage_buffer, min_advantage) )
 
         policy_grads = tape.gradient(policy_loss, self.actor.trainable_variables)
-        self.policy_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
+        #self.policy_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
+        self.actor.optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
 
         kl = tf.reduce_mean( old_probs- new_probs)
         kl = tf.reduce_sum(kl)
@@ -416,10 +419,10 @@ class Agent:
             value_loss = tf.reduce_mean((return_buffer - self.critic(state_buffer)) ** 2)
 
         value_grads = tape.gradient(value_loss, self.critic.trainable_variables)
-        self.value_optimizer.apply_gradients(zip(value_grads, self.critic.trainable_variables))
+        self.critic.optimizer.apply_gradients(zip(value_grads, self.critic.trainable_variables))
+        #self.value_optimizer.apply_gradients(zip(value_grads, self.critic.trainable_variables))
 
-    def training2(self, state, racer,n_epochs=2, steps_per_epoch=5, gamma=0.99, alpha=0.0003,
-                  gae_lambda=0.95,
+    def training2(self, state, racer,n_epochs=2, steps_per_epoch=5, gamma=0.99, alpha=0.0003,gae_lambda=0.95,
                   policy_clip=0.2, train_policy_iterations = 3, train_value_iterations = 3, target_kl = 0.01):
 
         for ep in range(n_epochs):
@@ -446,7 +449,7 @@ class Agent:
                 episode_return += reward
                 episode_length += 1
 
-                v_value = self.critic(state_actual)
+                v_value = self.critic.model(state_actual)
 
                 # in teoria basta state, action, rewprd, value_t, logp_t per il training
                 self.memory.store_memory(state_actual, action,  action_log_prob, reward, v_value, done)
@@ -462,7 +465,7 @@ class Agent:
 
                 if terminal or (t == steps_per_epoch - 1):
                     print("DONE = ", terminal, " t == steps_per_epoch? ", (t == steps_per_epoch - 1))
-                    last_value = 0 if done else self.critic(state_actual)
+                    last_value = 0 if done else self.critic.model(state_actual)
                     print("reward ====> ",reward)
                     self.memory.calculate_advantages(last_value)
                     sum_return += episode_return
@@ -521,19 +524,25 @@ class Agent:
                     advantages_buffer = tf.convert_to_tensor(advantages_buffer, dtype="float32")
 
                     print("advantages_buffer ", advantages_buffer)
-
-                    policy_loss_acc = -tf.reduce_mean(tf.minimum(prob_ratio_acc * advantages_buffer, tf.cast(min_advantage, tf.float32) ))
-                    policy_loss_dir = -tf.reduce_mean(tf.minimum(prob_ratio_dir * advantages_buffer, min_advantage), tf.cast(min_advantage, tf.float32))
+                    min_advantage = tf.cast(min_advantage, tf.float32)
+                    policy_loss_acc = -tf.reduce_mean(tf.minimum(prob_ratio_acc * advantages_buffer,min_advantage ))
+                    policy_loss_dir = -tf.reduce_mean(tf.minimum(prob_ratio_dir * advantages_buffer, min_advantage))
 
                     print("min_advantage ", min_advantage)
 
                     print("policy_loss_acc", policy_loss_acc)
                     print("policy_loss_dir", policy_loss_dir)
 
-                print("self.actor.trainable_variables", self.actor.trainable_variables)
-                policy_grads = tape.gradient(policy_loss, self.actor.trainable_variables)
-                self.policy_optimizer.apply_gradients(zip(policy_grads, self.actor.trainable_variables))
-                self.actor.trainable_variables
+                print("self.actor.trainable_variables", self.actor.model.trainable_variables)
+
+                policy_grads_acc = tape.gradient(policy_loss_acc, self.actor.model.trainable_variables)
+                policy_grads_dir = tape.gradient(policy_loss_dir, self.actor.model.trainable_variables)
+
+                #zip(policy_grads_acc, policy_grads_dir)
+             #   actor_loss =
+
+                self.actor.optimizer.apply_gradients(zip(policy_grads_acc, self.actor.model.trainable_variables))
+                #self.actor.optimizer.apply_gradients(zip(policy_grads_dir, self.actor.model.trainable_variables))
 
                 kl = tf.reduce_mean(old_probs - new_probs)
                 kl = tf.reduce_sum(kl)
@@ -551,6 +560,7 @@ class Agent:
 
             # Print mean return and length for each epoch
             print(" Epoch: ",ep + 1, ". Mean Return: ", sum_return / num_episodes, ". Mean Length: ", sum_length / num_episodes)
+
 
     def summary(self):
         print("The Agent is now working:\n")
