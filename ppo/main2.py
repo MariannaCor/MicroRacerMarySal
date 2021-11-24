@@ -1,12 +1,13 @@
 import numpy as np
 import tensorflow as tf
 import tracks
-from ppo.Agent2 import Agent2
+#from ppo.Agent2 import Agent2
 from tensorflow import keras
 from tensorflow.keras import layers
 
-#from MicroRacer_Corinaldesi_Fiorilla import tracks
+from MicroRacer_Corinaldesi_Fiorilla import tracks
 #from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent import Agent
+from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
 
 
 def max_lidar(observation, angle=np.pi / 3, pins=19):
@@ -49,6 +50,19 @@ Test this trained model for “m” episodes.
 If the average reward of test episodes is larger than the target reward set by you then stop otherwise repeat from step one.
 '''
 
+'''
+
+TODO:
+
+- cancellare stampe non necessarie
+- fare test di training:
+    1. avviare n volte la corsa e salvare media rewards ottenute
+    2. confrontare media
+    3. tenere la migliore (salvare il modello)
+    4. mostare parte grafica
+
+'''
+
 def training_agent(agent, env):
 
     gamma = 0.99
@@ -57,10 +71,11 @@ def training_agent(agent, env):
     policy_clip = 0.2,
 
     ##initialization
-    n_epochs,steps_per_epoch = 2, 5
+    n_epochs,steps_per_epoch = 8, 10
     train_policy_iterations, train_value_iterations = 3,3
     observation = env.reset()
     state = fromObservationToModelState(observation)
+    mean_returns = []
 
     for ep in range(n_epochs):
         sum_return = 0
@@ -74,10 +89,10 @@ def training_agent(agent, env):
         for t in range(steps_per_epoch):
 
             action, dists = agent.act(current_state)
+            v_value = agent.critic.model(current_state)
             print("dists ", dists)
             print("action ", action)
             observation, reward, done = env.step(action)
-            v_value = agent.critic.model(current_state)
 
             print("observation ", observation)
             print("reward ", reward)
@@ -87,7 +102,7 @@ def training_agent(agent, env):
 
             # in teoria bastano state, action_log_prob, reward, value_t
             agent.remember(current_state, action, dists, reward, v_value, done)
-            #agent.summary()
+
             # model te new observation we got to the current_state
             current_state = fromObservationToModelState(observation)
             # Finish trajectory if reached to a terminal state
@@ -96,7 +111,6 @@ def training_agent(agent, env):
             if terminal or (t == steps_per_epoch - 1):
                 print("DONE = ", terminal, " t == steps_per_epoch? ", (t == steps_per_epoch - 1))
                 last_value = 0 if done else agent.critic.model(current_state)
-                print("reward ====> ", reward)
 
                 agent.calculate_advantages(last_value, gamma = 0.99,lam = 0.95)
 
@@ -108,12 +122,16 @@ def training_agent(agent, env):
                 current_state = fromObservationToModelState(observation)
 
         '''Train neural networks for some epochs by calculating their respective loss.'''
-        agent.learn()
+
+        al, vl = agent.learn()
+        print("AL, VL = ", al, vl)
         agent.clean_memory()
 
-        print(" Epoch: ",ep + 1, ". Mean Return: ", sum_return / num_episodes, ". Mean Length: ", sum_length / num_episodes)
+        mean_returns.append(sum_return / num_episodes)
+        print("ep =", ep)
+        print(" Epoch: ",ep + 1, ". Mean Return: ", mean_returns[ep], ". Mean Length: ", sum_length / num_episodes)
 
-
+    print("MEAN RETURNS: ", tf.squeeze(mean_returns))
 
 if __name__ == '__main__':
     #tf.compat.v1.enable_eager_execution()
