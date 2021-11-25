@@ -1,13 +1,13 @@
 import numpy as np
 import tensorflow as tf
 import tracks
-#from ppo.Agent2 import Agent2
+import time
+from ppo.Agent2 import Agent2
 from tensorflow import keras
 from tensorflow.keras import layers
 
-from MicroRacer_Corinaldesi_Fiorilla import tracks
-#from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent import Agent
-from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
+#from MicroRacer_Corinaldesi_Fiorilla import tracks
+#from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
 
 
 def max_lidar(observation, angle=np.pi / 3, pins=19):
@@ -38,8 +38,32 @@ def fromObservationToModelState(observation):
     state = tf.expand_dims(state, 0)
     return state
 
-def new_race():
-    print("\n\nNEW RACE ")
+def new_race(env, agent, races=15):
+    print("\n\nNEW RACES ")
+
+    total_rewards = []
+    total_steps = []
+
+    for race in range(races):
+        observation = env.reset()
+        done = False
+        steps_race_counter = 0
+        rewards_for_race = []
+        while not done:
+            state = fromObservationToModelState(observation)
+            print("state input =",state)
+            action,prob = agent.act(state)
+            print("action =",action)
+            observation, reward, done = env.step(action)
+            steps_race_counter+=1
+            rewards_for_race.append(reward)
+
+        total_rewards.append(tf.reduce_sum(rewards_for_race).numpy())
+        total_steps.append(steps_race_counter)
+
+    return total_steps,total_rewards
+
+
 
 
 '''
@@ -63,75 +87,55 @@ TODO:
 
 '''
 
-def training_agent(agent, env):
+def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=20):
 
+    #for advantage computation
     gamma = 0.99
-    alpha = 0.0003
-    gae_lambda = 0.95,
-    policy_clip = 0.2,
+    lam = 0.95
+
+    #for learning
+    alpha = 0.0003 #learning rate
+    policy_clip = 0.2
 
     ##initialization
-    n_epochs,steps_per_epoch = 8, 10
-    train_policy_iterations, train_value_iterations = 3,3
     observation = env.reset()
     state = fromObservationToModelState(observation)
-    mean_returns = []
 
     for ep in range(n_epochs):
-        sum_return = 0
-        sum_length = 0
+
         num_episodes=0
-        length_episodes= 0
-        episode_return = 0
-        episode_length= 0
         current_state = state
 
         for t in range(steps_per_epoch):
 
             action, dists = agent.act(current_state)
             v_value = agent.critic.model(current_state)
-            print("dists ", dists)
-            print("action ", action)
             observation, reward, done = env.step(action)
 
-            print("observation ", observation)
-            print("reward ", reward)
-            print("done ", done)
-            episode_return += reward
-            episode_length += 1
-
-            # in teoria bastano state, action_log_prob, reward, value_t
             agent.remember(current_state, action, dists, reward, v_value, done)
 
-            # model te new observation we got to the current_state
+            #set the new state as current
             current_state = fromObservationToModelState(observation)
-            # Finish trajectory if reached to a terminal state
+
+            #set terminal condition
             terminal = done
 
+            # if The trajectory reached to a terminal state or the expected number we stop moving and we calculate advantage
             if terminal or (t == steps_per_epoch - 1):
-                print("DONE = ", terminal, " t == steps_per_epoch? ", (t == steps_per_epoch - 1))
+                #print("DONE = ", terminal, " t == steps_per_epoch? ", (t == steps_per_epoch - 1))
                 last_value = 0 if done else agent.critic.model(current_state)
-
-                agent.calculate_advantages(last_value, gamma = 0.99,lam = 0.95)
-
-                sum_return += episode_return
-                sum_length += episode_length
+                agent.calculate_advantages(last_value,gamma,lam)
                 num_episodes += 1
-                print("NUM_EPISODES INCREMENTED: ", num_episodes)
+                print("New Episode Starts. It's number: ", num_episodes)
                 observation, episode_return, episode_length = env.reset(), 0, 0
                 current_state = fromObservationToModelState(observation)
 
         '''Train neural networks for some epochs by calculating their respective loss.'''
-
-        al, vl = agent.learn()
-        print("AL, VL = ", al, vl)
+        agent.learn(training_iteration=train_iteration)
         agent.clean_memory()
+        print(" Epoch: ",ep + 1, "Number of episodes :",num_episodes)
 
-        mean_returns.append(sum_return / num_episodes)
-        print("ep =", ep)
-        print(" Epoch: ",ep + 1, ". Mean Return: ", mean_returns[ep], ". Mean Length: ", sum_length / num_episodes)
-
-    print("MEAN RETURNS: ", tf.squeeze(mean_returns))
+    return agent
 
 if __name__ == '__main__':
     #tf.compat.v1.enable_eager_execution()
@@ -147,11 +151,52 @@ if __name__ == '__main__':
     doTrain = True
     doRace = True
 
-    if doTrain:
-        training_agent(agent, env)
+    #accumulator params for tests
+    elapsed_time = 0
+    steps, rewards = [], []
+
+    #training params
+    n_epochs = 200
+    steps_per_epoch = 20
+    train_iteration = 50
+
+    ##race params
+    number_of_races = 50
 
     if doRace:
-        new_race()
+        stepsA, rewardsA = new_race(env, agent, races=number_of_races)
+
+
+    if doTrain:
+        t = time.process_time()
+        # do some stuff
+        agent = training_agent(env, agent,n_epochs=n_epochs, steps_per_epoch=steps_per_epoch, train_iteration=train_iteration)
+        elapsed_time = time.process_time() - t
+
+    if doRace:
+        steps,rewards = new_race(env,agent,races=number_of_races)
+
+    print("\nSummary of the " + str(number_of_races) + " races : \n")
+    print("Total Reward => ", rewardsA)
+    print("Steps done for race => ", stepsA)
+    print("Mean Reward : ", np.mean(rewardsA))
+    print("Mean Step Number : ", np.mean(stepsA))
+
+
+    print("\nTest Completed\n\nTraining Summary\n")
+    print("epoch number : " + str(n_epochs) + " steps_per_epoch " + str(steps_per_epoch) + " train_iteration " + str(train_iteration))
+    print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)
+
+    print("\nSummary of the " + str(number_of_races) + " races : \n")
+    print("Total Reward => ", rewards)
+    print("Steps done for race => ", steps)
+    print("Mean Reward : ", np.mean(rewards))
+    print("Mean Step Number : ", np.mean(steps))
+
+
+
+
+
 # def training2(self, state, racer, n_epochs=2, steps_per_epoch=5, gamma=0.99, alpha=0.0003, gae_lambda=0.95,
 #                   policy_clip=0.2, train_policy_iterations = 1, train_value_iterations = 1, target_kl = 0.01,
 #                   ):

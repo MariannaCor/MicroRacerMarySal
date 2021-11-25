@@ -71,13 +71,12 @@ class Memory:
         sss = ""
         for i in range(len(self.states)):
             sss += str(i) + " [\n" \
-                            "\t" + str(self.states[i][0]) + ",\n" \
-                                                            "\t" + str(self.actions[i]) + ",\n" \
-                                                                                          "\t" + str(
-                self.rewards[i]) + ",\n" \
-                                   "\t" + str(self.values[i]) + ",\n" \
-                                                                "\t" + str(self.log_probs[i]) + ",\n" \
-                                                                                                "\t" + str(
+                 "\t" + str(self.states[i][0]) + ",\n" \
+                 "\t" + str(self.actions[i]) + ",\n" \
+                 "\t" + str( self.rewards[i]) + ",\n" \
+                 "\t" + str(self.values[i]) + ",\n" \
+                 "\t" + str(self.log_probs[i]) + ",\n" \
+                 "\t" + str(
                 self.dones[i]) + " ]\n\n"
         print(sss)
 
@@ -113,15 +112,15 @@ class ActorNet():
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
         # acceleration
 
-        out1 = layers.Dense(256, activation="relu", trainable=train_acc)(inputs)
-        out1 = layers.Dense(256, activation="relu", trainable=train_acc)(out1)
+        out1 = layers.Dense(64, activation="relu", trainable=train_acc)(inputs)
+        out1 = layers.Dense(32, activation="relu", trainable=train_acc)(out1)
         # mu,var of accelleration
         mu_acc_out = layers.Dense(1, activation='tanh', trainable=train_acc)(out1)
         var_acc_out = layers.Dense(1, activation='softplus', trainable=train_acc)(out1)
 
         # direction
-        out2 = layers.Dense(256, activation="relu", trainable=train_dir)(inputs)
-        out2 = layers.Dense(256, activation="relu", trainable=train_dir)(out2)
+        out2 = layers.Dense(64, activation="relu", trainable=train_dir)(inputs)
+        out2 = layers.Dense(32, activation="relu", trainable=train_dir)(out2)
         # mu,var of direction
         mu_dir_out = layers.Dense(1, activation='tanh', trainable=train_dir)(out2)
         var_dir_out = layers.Dense(1, activation='softplus', trainable=train_dir)(out1)
@@ -143,7 +142,7 @@ class CriticNet():
         # input the state, output the value.
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
 
-        out = layers.Dense(86, activation="relu")(inputs)
+        out = layers.Dense(64, activation="relu")(inputs)
         out = layers.Dense(64, activation="relu")(out)
         outputs = layers.Dense(1, activation="relu")(out)
 
@@ -205,13 +204,13 @@ class Agent2:
         log_probs = tf.math.log(acc_prob) + tf.math.log(dir_prob)  # log di prob congiunta fra i due eventi indipendenti.
         log_probs = tf.reshape(log_probs, shape=[-1])
 
-        print("log_probs", log_probs)
-        print("samples", samples)
+        #print("log_probs", log_probs)
+        #print("samples", samples)
         samples = tf.squeeze(samples)
-        print("new samples ",samples)
+        #print("new samples ",samples)
         # es di output: [ valore_accellerazione, valore_direzione ], [ valore_logprob_congiunta_azione ]
         ret = samples, log_probs
-        print("ret ", ret)
+       # print("ret ", ret)
         return ret  #è un float32
 
     def act(self, state):
@@ -240,8 +239,8 @@ class Agent2:
         path_slice = slice(self.memory.trajectory_start_index, self.memory.index)
         rewards = np.append(self.memory.rewards[path_slice], last_value)
         values = np.append(self.memory.values[path_slice], last_value)
-        print("rewards", rewards)
-        print("values", values)
+        #print("rewards", rewards)
+        #print("values", values)
         # è una lista di tutti gli delta-i consiste in una serie di passate dall'elemento i fino alla fine dell'array.
         deltas = rewards[:-1] + (gamma * values[1:]) - values[:-1]
         # print("DELTAS = ", deltas)
@@ -263,6 +262,38 @@ class Agent2:
                             axis=1)  # cosi puoi dare in pasto alla rete tutto l'array di stati in un unico colpo.
         old_probs = tf.convert_to_tensor(dists_probs)
 
+        actor_trainable_variables = self.actor.model.trainable_variables
+
+        # train actor network
+        for iter in range(training_iteration):
+            print("TRAINING Actor Net ", str(iter + 1))
+            with tf.GradientTape(persistent=True) as tape:  # everithing here is recorded and released them.
+                tape.watch(actor_trainable_variables)
+                # forward step - TODO: seconda passata è corretto avere un altro campionamento?
+                print("states in input => ",states)
+                _, new_probs = self.act(states)
+                print("new_probs ", new_probs)
+                # compute loss
+                prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
+                min_advantage = tf.where(
+                    advantages > 0,
+                    (1 + .2) * advantages,
+                    (1 - .2) * advantages,
+                )
+                min_advantage = tf.cast(min_advantage, tf.float32)
+                partial = tf.math.multiply(prob_ratio, advantages)
+                # print("#p1 ", partial)
+                partial = tf.math.minimum(partial, min_advantage)
+                # print("#p2 ", partial)
+                partial = tf.reduce_mean(partial)
+                # print("#p3 ", partial)
+                actor_loss = tf.math.negative(partial)
+
+            grads = tape.gradient(actor_loss, actor_trainable_variables)
+            # print("grads = ", grads)
+            self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
+
+
         critic_trainable_variables = self.critic.model.trainable_variables
         # train critic network
         for iter in range(training_iteration):
@@ -281,49 +312,7 @@ class Agent2:
             self.critic.optimizer.apply_gradients(zip(grads, critic_trainable_variables))
 
         #advantages = tf.convert_to_tensor(advantages)
-        actor_trainable_variables = self.actor.model.trainable_variables
 
-        # train actor network
-        for iter in range(training_iteration):
-            print("TRAINING Actor Net ", str(iter + 1))
-            with tf.GradientTape(persistent=True) as tape:  # everithing here is recorded and released them.
-                tape.watch(actor_trainable_variables)
-                # tape.watch(states)
-                # tape.watch(advantages)
-                # tape.watch(old_probs)
-
-                # forward step - TODO: seconda passata è corretto avere un altro campionamento?
-                _, new_probs = self.act(states)
-                # compute loss
-                print("new_probs ",new_probs)
-
-                prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
-                min_advantage = tf.where(
-                    advantages > 0,
-                    (1 + .2) * advantages,
-                    (1 - .2) * advantages,
-                )
-                min_advantage = tf.cast(min_advantage, tf.float32)
-                print("new_probs = ", new_probs)
-                print("prob_ratio = ", prob_ratio)
-                print("advantages = ", advantages)
-                print("min_advantage = ", min_advantage)
-                partial = tf.math.multiply(prob_ratio, advantages)
-                print("#p1 ", partial)
-                partial = tf.math.minimum(partial, min_advantage)
-                print("#p2 ", partial)
-                partial = tf.reduce_mean(partial)
-                print("#p3 ", partial)
-                actor_loss = tf.math.negative(partial)
-
-            print("actor_loss = ", actor_loss)
-            print("new_probs = ", new_probs)
-            print("old_probs = ", old_probs)
-            print("advantages = ", advantages)
-            # print("self.actor.model.trainable_variables = ", self.actor.model.trainable_variables)
-            grads = tape.gradient(actor_loss, actor_trainable_variables)
-            print("grads = ", grads)
-            self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
 
         return actor_loss, value_loss
     # def compute_actor_loss(self, new_probs, old_probs, advantages):
