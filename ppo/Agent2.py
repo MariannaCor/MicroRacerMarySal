@@ -1,6 +1,6 @@
 # IMPORTSsss
 import math
-
+import sys
 import numpy as np
 
 import scipy.stats as stats
@@ -57,7 +57,7 @@ class Memory:
         self.index += 1
 
     def clear_memory(self):
-        print("clearing memory")
+        #print("clearing memory")
         self.states = []
         self.actions = []
         self.log_probs = []
@@ -95,7 +95,6 @@ class Memory:
             self.log_probs,
             self.rewards,
             self.advantages
-
         )
 
 
@@ -110,31 +109,29 @@ class ActorNet():
         train_dir = True
 
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
-        # acceleration
 
-        out1 = layers.Dense(64, activation="relu", trainable=train_acc)(inputs)
-        out1 = layers.Dense(32, activation="relu", trainable=train_acc)(out1)
+        # tower of acceleration
+        out1 = layers.Dense(128, activation="relu", trainable=train_acc)(inputs)
+        out1 = layers.Dense(128, activation="relu", trainable=train_acc)(out1)
         # mu,var of accelleration
         mu_acc_out = layers.Dense(1, activation='tanh', trainable=train_acc)(out1)
         var_acc_out = layers.Dense(1, activation='softplus', trainable=train_acc)(out1)
 
-        # direction
-        out2 = layers.Dense(64, activation="relu", trainable=train_dir)(inputs)
-        out2 = layers.Dense(32, activation="relu", trainable=train_dir)(out2)
+        # tower of direction
+        out2 = layers.Dense(128, activation="relu", trainable=train_dir)(inputs)
+        out2 = layers.Dense(128, activation="relu", trainable=train_dir)(out2)
         # mu,var of direction
         mu_dir_out = layers.Dense(1, activation='tanh', trainable=train_dir)(out2)
-        var_dir_out = layers.Dense(1, activation='softplus', trainable=train_dir)(out1)
+        var_dir_out = layers.Dense(1, activation='softplus', trainable=train_dir)(out2)
 
         outputs = layers.concatenate([mu_acc_out, var_acc_out, mu_dir_out, var_dir_out])
 
         self.model = keras.Model(inputs, outputs, name="ActorNet")
         self.optimizer = keras.optimizers.Adam(learning_rate=lr)
 
-    def save_checkpoint(self, model):
-        model.save('MicroRacer_Corinaldesi_Fiorilla/saved_models')
+    def save_checkpoint(self):
+        self.model.save('saved_models/actor')
 
-    def load_checkpoint(self):
-        return keras.models.load_model('MicroRacer_Corinaldesi_Fiorilla/saved_models')
 
 class CriticNet():
     def __init__(self, input_dims, lr=0.0003):
@@ -143,34 +140,47 @@ class CriticNet():
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
 
         out = layers.Dense(64, activation="relu")(inputs)
+        out = layers.Dense(128, activation="relu")(out)
         out = layers.Dense(64, activation="relu")(out)
         outputs = layers.Dense(1, activation="relu")(out)
 
-        self.model = keras.Model(inputs, outputs, name="CriticNet")
         self.optimizer = keras.optimizers.Adam(learning_rate=lr)
+        self.model = keras.Model(inputs, outputs, name="CriticNet")
 
-    def save_checkpoint(self): None
 
-    def load_checkpoint(self): None
+    def save_checkpoint(self):
+        self.model.save('saved_models/critic')
+
 
 
 class Agent2:
 
-    def __init__(self, state_dimension, alpha=0.0003, chunk_memory_size=5, num_actions=2):
+    def __init__(self, state_dimension, alpha=3e-4, chunk_memory_size=5, load_models=False):
 
         self.alpha = alpha
         self.state_dimension = state_dimension
-        self.num_action = num_actions
-        self.policy_learning_rate = 3e-4
-        self.value_function_learning_rate = 1e-3
-
         self.memory = Memory(chunk_memory_size)
-        self.actor = ActorNet(input_dims=state_dimension, lr=alpha)
-        self.critic = CriticNet(input_dims=state_dimension, lr=alpha)
+
+        if not load_models:
+            self.actor = ActorNet(input_dims=state_dimension, lr=self.alpha)
+            self.actor.model.compile(optimizer=self.actor.optimizer)
+
+            self.critic = CriticNet(input_dims=state_dimension, lr=self.alpha)
+            self.critic.model.compile(optimizer=self.critic.optimizer)
+        else:
+            self.load_models()
+
 
     def pdf(self, guess, mean, sd):
         return 1 / tf.math.sqrt(2 * math.pi) * tf.math.exp((-guess ** 2) / 2)
 
+    def save_models(self):
+        self.actor.save_checkpoint()
+        self.critic.save_checkpoint()
+
+    def load_models(self):
+        self.actor  = keras.models.load_model('saved_models/actor')
+        self.critic = keras.models.load_model('saved_models/critic')
 
     #TODO: verificare valore noise, troppo grande?
     def get_truncated_normal(self, mean, sd, low=-1, upp=1, noise=0.0005):
@@ -180,18 +190,11 @@ class Agent2:
 
     def samplingAction(self, distributions):
         # splitto l'output della rete per colonne, le metto in vettori riga con reshape e prendo i valori di media ed accellerazione prodotti dalla rete nell'ordine
-        # print("distribution now ", distributions)
         mean_acc, stddev_acc, mean_dir, stddev_dir = tf.split(distributions, num_or_size_splits=4, axis=1)
-
         mean_acc = tf.reshape(mean_acc, shape=[-1])
         stddev_acc = tf.reshape(stddev_acc, shape=[-1])
         mean_dir = tf.reshape(mean_dir, shape=[-1])
         stddev_dir = tf.reshape(stddev_dir, shape=[-1])
-
-        # print("mean_acc ", mean_acc)
-        # print("stddev_acc ", stddev_acc)
-        # print("mean_dir ", mean_dir)
-        # print("stddev_dir ", stddev_dir)
 
         # campiono dalle distribuzioni,  nei range un possibile valore per accellerazione e direzione
         acc_sample = self.get_truncated_normal(mean=mean_acc, sd=stddev_acc, low=-1, upp=1)
@@ -203,19 +206,20 @@ class Agent2:
         dir_prob = self.pdf(dir_sample, mean=mean_dir, sd=stddev_dir)
         log_probs = tf.math.log(acc_prob) + tf.math.log(dir_prob)  # log di prob congiunta fra i due eventi indipendenti.
         log_probs = tf.reshape(log_probs, shape=[-1])
-
-        #print("log_probs", log_probs)
-        #print("samples", samples)
         samples = tf.squeeze(samples)
-        #print("new samples ",samples)
         # es di output: [ valore_accellerazione, valore_direzione ], [ valore_logprob_congiunta_azione ]
         ret = samples, log_probs
-       # print("ret ", ret)
         return ret  #è un float32
 
     def act(self, state):
-        dists = self.actor.model(state)
-        return self.samplingAction(dists)
+        dists = tf.convert_to_tensor ( self.actor.model(state) )
+        if np.isnan(dists).any():
+            print(dists)
+            sys.exit("Errore tornato nan dalla neural network actor ")
+
+        ret = self.samplingAction(dists)
+
+        return ret
 
     def remember(self, state, action, prob, reward, value, done):
         self.memory.store_memory(state, action, prob, reward, value, done)
@@ -263,16 +267,19 @@ class Agent2:
         old_probs = tf.convert_to_tensor(dists_probs)
 
         actor_trainable_variables = self.actor.model.trainable_variables
-
         # train actor network
         for iter in range(training_iteration):
-            print("TRAINING Actor Net ", str(iter + 1))
-            with tf.GradientTape(persistent=True) as tape:  # everithing here is recorded and released them.
+            #print("TRAINING Actor Net ", str(iter + 1))
+            with tf.GradientTape() as tape:  # everithing here is recorded and released them.
                 tape.watch(actor_trainable_variables)
                 # forward step - TODO: seconda passata è corretto avere un altro campionamento?
-                print("states in input => ",states)
+                #print("states in input => ",states)
+                if np.isnan(states).any():
+                    print(states)
+                    sys.exit("ACTOR :: states is nan exiting ...")
+
                 _, new_probs = self.act(states)
-                print("new_probs ", new_probs)
+                #print("new_probs ", new_probs)
                 # compute loss
                 prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
                 min_advantage = tf.where(
@@ -290,49 +297,35 @@ class Agent2:
                 actor_loss = tf.math.negative(partial)
 
             grads = tape.gradient(actor_loss, actor_trainable_variables)
-            # print("grads = ", grads)
+            #print("grads len = ", len( grads))
+            #print("grads = ", grads)
             self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
 
 
         critic_trainable_variables = self.critic.model.trainable_variables
         # train critic network
         for iter in range(training_iteration):
-            print("TRAINING Critic Net ", str(iter + 1))
-            with tf.GradientTape(persistent=True) as tape:
+            #print("TRAINING Critic Net ", str(iter + 1))
+            with tf.GradientTape() as tape:
                 tape.watch(critic_trainable_variables)
-                # forward
-                new_vals = self.critic.model(states)
-                # print("new_vals ", new_vals)
-                # loss calculation
+                if np.isnan(states).any():
+                    print(states)
+                    sys.exit("CRITIC :: states is nan exiting ...")
+                new_vals = tf.convert_to_tensor (self.critic.model(states) )
+                if(np.isnan(new_vals)).any():
+                    print("new vals is nan ? ",new_vals)
+                    sys.exit("new vals is nan")
+
+                # forward and loss calculation
                 value_loss = tf.reduce_mean((rewards - new_vals) ** 2)
 
             # print("value _loss ", value_loss)
             grads = tape.gradient(value_loss, critic_trainable_variables)
-            # print("grads CRITIC ", grads)
+            #print("grads len = ", len(grads))
+            #print("grads CRITIC ", grads)
             self.critic.optimizer.apply_gradients(zip(grads, critic_trainable_variables))
 
         #advantages = tf.convert_to_tensor(advantages)
 
 
         return actor_loss, value_loss
-    # def compute_actor_loss(self, new_probs, old_probs, advantages):
-    #
-    #     prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
-    #     min_advantage = tf.where(
-    #         advantages > 0,
-    #         (1 + .2) * advantages,
-    #         (1 - .2) * advantages,
-    #     )
-    #     #print("prob ration = ", prob_ratio)
-    #     #print("advantages_buffer = ", advantages)
-    #     #print("min_advantage = ", min_advantage)
-    #
-    #     partial = tf.math.multiply( prob_ratio , advantages )
-    #     #print("#p1 ", partial)
-    #     partial = tf.math.minimum( partial, min_advantage)
-    #     #print("#p2 ", partial)
-    #     partial =  tf.reduce_mean( partial)
-    #     #print("#p3 ", partial)
-    #     loss = tf.math.negative(partial)
-    #     #print("#total loss ", loss)
-    #     return loss

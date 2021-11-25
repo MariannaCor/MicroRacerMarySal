@@ -51,9 +51,9 @@ def new_race(env, agent, races=15):
         rewards_for_race = []
         while not done:
             state = fromObservationToModelState(observation)
-            print("state input =",state)
+            #print("state input =",state)
             action,prob = agent.act(state)
-            print("action =",action)
+            #print("action =",action)
             observation, reward, done = env.step(action)
             steps_race_counter+=1
             rewards_for_race.append(reward)
@@ -91,49 +91,60 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
 
     #for advantage computation
     gamma = 0.99
-    lam = 0.95
+    lam = 0.97
 
     #for learning
-    alpha = 0.0003 #learning rate
     policy_clip = 0.2
 
     ##initialization
     observation = env.reset()
     state = fromObservationToModelState(observation)
 
-    for ep in range(n_epochs):
+    episodic_reward_list = []
 
+    for ep in range(n_epochs):
         num_episodes=0
         current_state = state
-
+        episodic_reward = 0
         for t in range(steps_per_epoch):
-
+            #print("t step is "+str(t)+"in ep "+str(ep + 1))
             action, dists = agent.act(current_state)
+            x = np.isnan(action)
+            while x.any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
+                print("np.isnan (action ) =", x.any())
+                action, dists = agent.act(current_state)
+
             v_value = agent.critic.model(current_state)
             observation, reward, done = env.step(action)
 
             agent.remember(current_state, action, dists, reward, v_value, done)
+            episodic_reward +=reward
 
             #set the new state as current
             current_state = fromObservationToModelState(observation)
-
             #set terminal condition
             terminal = done
-
             # if The trajectory reached to a terminal state or the expected number we stop moving and we calculate advantage
             if terminal or (t == steps_per_epoch - 1):
-                #print("DONE = ", terminal, " t == steps_per_epoch? ", (t == steps_per_epoch - 1))
                 last_value = 0 if done else agent.critic.model(current_state)
                 agent.calculate_advantages(last_value,gamma,lam)
                 num_episodes += 1
-                print("New Episode Starts. It's number: ", num_episodes)
-                observation, episode_return, episode_length = env.reset(), 0, 0
-                current_state = fromObservationToModelState(observation)
+                #print("New Episode Starts. It's number: ", num_episodes)
+                current_state = fromObservationToModelState(env.reset())
+                episodic_reward_list.append(episodic_reward)
+                episodic_reward=0
 
         '''Train neural networks for some epochs by calculating their respective loss.'''
-        agent.learn(training_iteration=train_iteration)
+        a_loss, c_loss = agent.learn(training_iteration=train_iteration)
         agent.clean_memory()
-        print(" Epoch: ",ep + 1, "Number of episodes :",num_episodes)
+
+        print(" A LOSS =",a_loss)
+        print(" C LOSS =", c_loss)
+
+        print(" Epoch: ",ep + 1, "Number of episodes :",num_episodes, " Average Reward ",np.mean(episodic_reward_list))
+
+        if (ep+1) % 3 == 0:
+            agent.save_models()
 
     return agent
 
@@ -145,27 +156,26 @@ if __name__ == '__main__':
     env = tracks.Racer()
     state_dim = 5  # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
+    alpha= 0.001# learning rate
+    agent = Agent2(state_dimension=state_dim, chunk_memory_size=10, alpha=alpha)
 
-    agent = Agent2(state_dimension=state_dim, chunk_memory_size=10, num_actions = num_actions)
-
-    doTrain = True
+    doTrain = False
     doRace = True
 
     #accumulator params for tests
     elapsed_time = 0
     steps, rewards = [], []
 
-    #training params
-    n_epochs = 200
-    steps_per_epoch = 20
-    train_iteration = 50
+    #training params come in cartpole: poche epoche, 80 train_iteration e 40000 steps
+    n_epochs = 3
+    steps_per_epoch = 50 ##quando da nan potrebbe essere
+    train_iteration = 80
 
     ##race params
     number_of_races = 50
 
-    if doRace:
-        stepsA, rewardsA = new_race(env, agent, races=number_of_races)
-
+    #if doRace:
+    #    stepsA, rewardsA = new_race(env, agent, races=number_of_races)
 
     if doTrain:
         t = time.process_time()
@@ -174,13 +184,15 @@ if __name__ == '__main__':
         elapsed_time = time.process_time() - t
 
     if doRace:
+        agent = agent.load_models()
         steps,rewards = new_race(env,agent,races=number_of_races)
 
-    print("\nSummary of the " + str(number_of_races) + " races : \n")
-    print("Total Reward => ", rewardsA)
-    print("Steps done for race => ", stepsA)
-    print("Mean Reward : ", np.mean(rewardsA))
-    print("Mean Step Number : ", np.mean(stepsA))
+
+    #print("\nSummary of the " + str(number_of_races) + " races : \n")
+    #print("Total Reward => ", rewardsA)
+    #print("Steps done for race => ", stepsA)
+    #print("Mean Reward : ", np.mean(rewardsA))
+    #print("Mean Step Number : ", np.mean(stepsA))
 
 
     print("\nTest Completed\n\nTraining Summary\n")
@@ -244,3 +256,35 @@ if __name__ == '__main__':
 #                     print("NUM_EPISODES INCREMENTED: ", num_episodes)
 #                     state_actual, episode_return, episode_length = racer.reset(), 0, 0
 #                     state_actual = self.fromObservationToModelState(state_actual)
+#
+#
+#
+#
+#           for batch in batches:
+#                 states = T.tensor(state_arr[batch], dtype=T.float).to(self.actor.device)
+#                 old_probs = T.tensor(old_prob_arr[batch]).to(self.actor.device)
+#                 actions = T.tensor(action_arr[batch]).to(self.actor.device)
+#
+#                 dist = self.actor(states)
+#                 critic_value = self.critic(states)
+#
+#                 critic_value = T.squeeze(critic_value)
+#
+#                 new_probs = dist.log_prob(actions)
+
+#                 #prob_ratio = (new_probs - old_probs).exp()
+#                 weighted_probs = advantage[batch] * prob_ratio
+#                 weighted_clipped_probs = T.clamp(prob_ratio, 1-self.policy_clip,
+#                         1+self.policy_clip)*advantage[batch]
+#                 actor_loss = -T.min(weighted_probs, weighted_clipped_probs).mean()
+#
+#                 returns = advantage[batch] + values[batch]
+#                 critic_loss = (returns-critic_value)**2
+#                 critic_loss = critic_loss.mean()
+#
+#                 total_loss = actor_loss + 0.5*critic_loss
+#                 self.actor.optimizer.zero_grad()
+#                 self.critic.optimizer.zero_grad()
+#                 total_loss.backward()
+#                 self.actor.optimizer.step()
+#                 self.critic.optimizer.step()
