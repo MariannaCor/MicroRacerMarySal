@@ -226,7 +226,7 @@ class Racer:
         self.carvx, self.carvy = -self.cs(0, 1)
         self.done = False
         v = np.random.uniform() * .5
-        print("initial speed = ", v)
+        #print("initial speed = ", v)
         vnorm = v / ((self.carvx ** 2 + self.carvy ** 2) ** .5)
         self.carvx *= vnorm
         self.carvy *= vnorm
@@ -241,8 +241,8 @@ class Racer:
         acc, turn = action
         acc.numpy()
         turn.numpy()
-        print("acc: ", acc.numpy())
-        print("turn: ", turn.numpy())
+        #print("acc: ", acc.numpy())
+        #print("turn: ", turn.numpy())
         v = (self.carvx ** 2 + self.carvy ** 2) ** .5
         newv = max(0, v + acc * max_incr)
         cardir = np.arctan2(self.carvy, self.carvx)
@@ -272,10 +272,10 @@ class Racer:
             return ((lidar_signal, v), v * self.tstep, self.done)
 
         else:
-            if not (on_route):
-                print("crossing border")
-            else:
-                print("wrong direction")
+            #if not (on_route):
+                 #print("crossing border")
+            #else:
+                 #print("wrong direction")
             self.done = True
             reward = -3
             state = None

@@ -130,7 +130,7 @@ class ActorNet():
         self.optimizer = keras.optimizers.Adam(learning_rate=lr)
 
     def save_checkpoint(self):
-        self.model.save('saved_models/actor')
+        self.model.save('saved_model/actor')
 
 
 class CriticNet():
@@ -149,7 +149,7 @@ class CriticNet():
 
 
     def save_checkpoint(self):
-        self.model.save('saved_models/critic')
+        self.model.save('saved_model/critic')
 
 
 
@@ -179,8 +179,8 @@ class Agent2:
         self.critic.save_checkpoint()
 
     def load_models(self):
-        self.actor  = keras.models.load_model('saved_models/actor')
-        self.critic = keras.models.load_model('saved_models/critic')
+        self.actor.model= keras.models.load_model('saved_model/actor')
+        self.critic.model  = keras.models.load_model('saved_model/critic')
 
     #TODO: verificare valore noise, troppo grande?
     def get_truncated_normal(self, mean, sd, low=-1, upp=1, noise=0.0005):
@@ -329,3 +329,10 @@ class Agent2:
 
 
         return actor_loss, value_loss
+
+
+    def summary(self):
+        print("Actor Summary ")
+        self.actor.model.summary()
+        print("Critic Summary ")
+        self.critic.model.summary()

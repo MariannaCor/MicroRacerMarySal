@@ -159,8 +159,9 @@ if __name__ == '__main__':
     alpha= 0.001# learning rate
     agent = Agent2(state_dimension=state_dim, chunk_memory_size=10, alpha=alpha)
 
-    doTrain = False
-    doRace = True
+    # 1 is true, 0 is false
+    doTrain = 0
+    doRace = 1
 
     #accumulator params for tests
     elapsed_time = 0
@@ -184,7 +185,8 @@ if __name__ == '__main__':
         elapsed_time = time.process_time() - t
 
     if doRace:
-        agent = agent.load_models()
+        agent.load_models()
+        agent.summary()
         steps,rewards = new_race(env,agent,races=number_of_races)
 
 
