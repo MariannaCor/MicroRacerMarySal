@@ -199,7 +199,7 @@ if __name__ == '__main__':
         elapsed_time = time.process_time() - t
 
     if doRace:
-        #agent.load_models()
+        agent.load_models()
         steps,rewards = new_race(env,agent,races=number_of_races)
 
 
