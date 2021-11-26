@@ -1,13 +1,13 @@
 import numpy as np
 import tensorflow as tf
-import tracks
+#import tracks
 import time
-from ppo.Agent2 import Agent2
+#from ppo.Agent2 import Agent2
 from tensorflow import keras
 from tensorflow.keras import layers
 
-#from MicroRacer_Corinaldesi_Fiorilla import tracks
-#from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
+from MicroRacer_Corinaldesi_Fiorilla import tracks
+from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
 
 
 def max_lidar(observation, angle=np.pi / 3, pins=19):
@@ -39,7 +39,7 @@ def fromObservationToModelState(observation):
     return state
 
 def new_race(env, agent, races=15):
-    print("\n\nNEW RACES ")
+    #print("NEW RACES ")
 
     total_rewards = []
     total_steps = []
@@ -87,6 +87,14 @@ TODO:
 
 '''
 
+def print_results(steps, rewards):
+    # risultati delle corse dopo il training per ogni epoca
+    print("Total Reward => ", rewards)
+    print("Steps done for race => ", steps)
+    print("Mean Reward : ", np.mean(rewards))
+    print("Mean Step Number : ", np.mean(steps))
+    print("###################################")
+
 def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=20):
 
     #for advantage computation
@@ -106,6 +114,7 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
         num_episodes=0
         current_state = state
         episodic_reward = 0
+        print(ep+1, " EPOCH")
         for t in range(steps_per_epoch):
             #print("t step is "+str(t)+"in ep "+str(ep + 1))
             action, dists = agent.act(current_state)
@@ -136,12 +145,13 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
 
         '''Train neural networks for some epochs by calculating their respective loss.'''
         a_loss, c_loss = agent.learn(training_iteration=train_iteration)
+
         agent.clean_memory()
 
-        print(" A LOSS =",a_loss)
-        print(" C LOSS =", c_loss)
+        #print(" A LOSS =",a_loss)
+        #print(" C LOSS =", c_loss)
 
-        print(" Epoch: ",ep + 1, "Number of episodes :",num_episodes, " Average Reward ",np.mean(episodic_reward_list))
+        #print(" Epoch: ",ep + 1, "Number of episodes :",num_episodes, " Average Reward ",np.mean(episodic_reward_list))
 
         if (ep+1) % 3 == 0:
             agent.save_models()
@@ -156,8 +166,8 @@ if __name__ == '__main__':
     env = tracks.Racer()
     state_dim = 5  # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
-    alpha= 0.001# learning rate
-    agent = Agent2(state_dimension=state_dim, chunk_memory_size=10, alpha=alpha)
+    alpha= 0.001 # learning rate
+
 
     # 1 is true, 0 is false
     doTrain = 0
@@ -168,15 +178,19 @@ if __name__ == '__main__':
     steps, rewards = [], []
 
     #training params come in cartpole: poche epoche, 80 train_iteration e 40000 steps
-    n_epochs = 3
-    steps_per_epoch = 50 ##quando da nan potrebbe essere
-    train_iteration = 80
+    n_epochs = 100
+    steps_per_epoch = 100  ##quando da nan potrebbe essere
+    train_iteration = 100
 
     ##race params
-    number_of_races = 50
+    number_of_races = 20
+
+    agent = Agent2(state_dimension=state_dim, chunk_memory_size=steps_per_epoch, alpha=alpha)
 
     #if doRace:
     #    stepsA, rewardsA = new_race(env, agent, races=number_of_races)
+   # steps, rewards = new_race(env, agent, races=number_of_races)
+   # print_results(steps, rewards)
 
     if doTrain:
         t = time.process_time()
@@ -185,8 +199,7 @@ if __name__ == '__main__':
         elapsed_time = time.process_time() - t
 
     if doRace:
-        agent.load_models()
-        agent.summary()
+        #agent.load_models()
         steps,rewards = new_race(env,agent,races=number_of_races)
 
 

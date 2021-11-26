@@ -175,11 +175,15 @@ class Agent2:
         return 1 / tf.math.sqrt(2 * math.pi) * tf.math.exp((-guess ** 2) / 2)
 
     def save_models(self):
+        print("SAVING ACTOR")
         self.actor.save_checkpoint()
+        print("SAVING CRITIC")
         self.critic.save_checkpoint()
 
     def load_models(self):
+        print("LOADING ACTOR")
         self.actor.model= keras.models.load_model('saved_model/actor')
+        print("LOADING CRITIC")
         self.critic.model  = keras.models.load_model('saved_model/critic')
 
     #TODO: verificare valore noise, troppo grande?
