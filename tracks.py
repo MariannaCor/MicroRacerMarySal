@@ -73,7 +73,8 @@ def smooth(var):
 
 def create_random_track(curves=20):
     theta = 2 * np.pi * np.linspace(0, 1, curves)
-    var = np.random.rand(curves)
+    #var = np.random.rand(curves)
+    var = np.array([0.00830216, 0.88327782,0.07103706,0.65551949,0.52418313,0.57632627,0.43218312, 0.6275957,  0.01994222, 0.83215567, 0.24247545, 0.37514704,0.28206495, 0.57385784 ,0.75437236 ,0.55755698 ,0.15442498, 0.7364395, 0.71530165 ,0.63396263])
     var = smooth(var)
     var = var * .5 + .7
     var[curves - 1] = var[0]
