@@ -108,19 +108,22 @@ class ActorNet():
         train_acc = True
         train_dir = True
 
+       # initializer = tf.keras.initializers.GlorotUniform(seed=None)
+        initializer = tf.keras.initializers.HeUniform()
+
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
 
         # tower of acceleration
-        out1 = layers.Dense(16, activation="relu", trainable=train_acc)(inputs)
-        out1 = layers.Dense(16, activation="relu", trainable=train_acc)(out1)
+        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=initializer )(inputs)
+        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=initializer )(out1)
 
         # mu,var of accelleration
-        mu_acc_out = layers.Dense(1, activation='tanh', trainable=train_acc)(out1)
-        var_acc_out = layers.Dense(1, activation='softplus', trainable=train_acc)(out1)
+        mu_acc_out = layers.Dense(1, activation='tanh', trainable=train_acc )(out1)
+        var_acc_out = layers.Dense(1, activation='softplus', trainable=train_acc )(out1)
 
         # tower of direction
-        out2 = layers.Dense(16, activation="relu", trainable=train_dir)(inputs)
-        out2 = layers.Dense(16, activation="relu", trainable=train_dir)(out2)
+        out2 = layers.Dense(32, activation="relu", trainable=train_dir, kernel_initializer=initializer)(inputs)
+        out2 = layers.Dense(32, activation="relu", trainable=train_dir , kernel_initializer=initializer)(out2)
 
         # mu,var of direction
         mu_dir_out = layers.Dense(1, activation='tanh', trainable=train_dir)(out2)
@@ -137,13 +140,21 @@ class ActorNet():
 
 class CriticNet():
     def __init__(self, input_dims, lr=0.0003):
-        # still missing to define the save and device over execute the net: cpu vs gpu for instance.
-        # input the state, output the value.
+
+        #tf.keras.initializers.HeUniform() migliore fino ad ora arriva a 300ep
+        initializer = tf.keras.initializers.HeNormal()
+        #initializer =  tf.keras.initializers.RandomUniform(minval=0.00005, maxval=0.07
+        #initializer =  tf.keras.initializers.TruncatedNormal(mean=0., stddev=0.5)
+        #initializer = tf.keras.initializers.HeUniform()
+        #vedi altri su https://keras.io/api/layers/initializers/#henormal-class
+        #al link giù ho letto che funziona bene con he uniform ma non va oltre i 250 in realtà
+        # https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
+
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
 
-        out = layers.Dense(16, activation="relu")(inputs)
-        out = layers.Dense(16, activation="relu")(out)
-        out = layers.Dense(16, activation="relu")(out)
+        out = layers.Dense(32, activation="relu",kernel_initializer=initializer)(inputs)
+        out = layers.Dense(32, activation="relu",kernel_initializer=initializer)(out)
+        out = layers.Dense(32, activation="relu",kernel_initializer=initializer)(out)
         outputs = layers.Dense(1, activation="relu")(out)
 
         self.optimizer = keras.optimizers.Adam(learning_rate=lr, clipvalue=0.5)
@@ -159,14 +170,14 @@ class Agent2:
 
     def __init__(self, state_dimension, path_saving_model ,alpha=3e-4, load_models=False, ):
 
-        self.alpha = alpha
+        lrActor,lrCritic = alpha
         self.state_dimension = state_dimension
         self.memory = Memory()
 
-        self.actor = ActorNet(input_dims=state_dimension, lr=self.alpha)
+        self.actor = ActorNet(input_dims=state_dimension, lr=lrActor)
         self.actor.model.compile(optimizer=self.actor.optimizer)
 
-        self.critic = CriticNet(input_dims=state_dimension, lr=self.alpha)
+        self.critic = CriticNet(input_dims=state_dimension, lr=lrCritic)
         self.critic.model.compile(optimizer=self.critic.optimizer)
 
         if load_models:
@@ -284,6 +295,10 @@ class Agent2:
             # print("new_probs ", new_probs)
             # compute loss
             prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
+            if np.isnan(prob_ratio).any():
+                print(prob_ratio)
+                sys.exit("ACTOR :: prob_ratio is nan exiting ...")
+
             min_advantage = tf.where(
                 advantages > 0,
                 (1 + .2) * advantages,
@@ -309,14 +324,19 @@ class Agent2:
     def train_critic_network(self,states, rewards,critic_trainable_variables):
         with tf.GradientTape() as tape:
             tape.watch(critic_trainable_variables)
+
             if np.isnan(states).any():
                 print(states)
                 sys.exit("CRITIC :: states is nan exiting ...")
-            new_vals = tf.convert_to_tensor(self.critic.model(states))
+
+            xx = self.critic.model(states)
+            if (np.isnan(xx)).any():
+                print("xx is nan ? ", xx)
+                sys.exit("CRITIC :: xx is nan exiting ...")
+
+            new_vals = tf.convert_to_tensor(xx)
             #print("new vals ",new_vals)
-            if (np.isnan(new_vals)).any():
-                 print("new vals is nan ? ", new_vals)
-                 sys.exit("CRITIC :: new vals is nan exiting ...")
+
             # forward and loss calculation
             value_loss = tf.reduce_mean((rewards - new_vals) ** 2)
             #print(" V ",value_loss)

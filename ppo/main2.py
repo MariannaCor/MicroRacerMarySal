@@ -110,8 +110,8 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
         for t in range(steps_per_epoch):
             #print("t step is "+str(t)+"in ep "+str(ep + 1))
             action, dists = agent.act(current_state)
-            x = np.isnan(action)
-            if x.any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
+
+            if np.isnan(action).any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
                 print(x.any())
                 sys.exit("np.isnan (action ) ")
                 action, dists = agent.act(current_state)
@@ -176,10 +176,12 @@ if __name__ == '__main__':
     env = tracks.Racer()
     state_dim = 5  # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
-    alpha= 0.00001 # learning rate
+
+    alpha= 0.0001,0.0001 # learning rate: il primo è actor, il secondo è critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
+
 
     # 1 is true, 0 is false
-    doTrain = 1
+    doTrain = 0
     doRace = 1
 
     #accumulator params for tests
@@ -187,8 +189,8 @@ if __name__ == '__main__':
     steps, rewards = [], []
 
     #training params come in cartpole: poche epoche, 80 train_iteration e 40000 steps
-    n_epochs = 10
-    steps_per_epoch = 500 ##quando da nan potrebbe essere
+    n_epochs = 20
+    steps_per_epoch = 250
     train_iteration = 100
 
     ##race params
