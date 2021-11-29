@@ -29,7 +29,7 @@ class Memory:
         n_states = len(self.states)
         # numpy.arrange([start, ]stop, [step, ], dtype = None) -> numpy.ndarray
         # es np.arange(0,10,2,float)  -> [0. 2. 4. 6. 8.]
-        batch_start = np.arange(0, n_states, self.chunk_size)
+        batch_start = np.arange(0, n_states, 50)
         print("batch_start = ", batch_start)
         indices = np.arange(n_states, dtype=np.int64)
         print("indices =", indices)
@@ -43,7 +43,6 @@ class Memory:
                np.array(self.rewards), \
                np.array(self.values), \
                np.array(self.advantages), \
-               np.array(self.dones), \
                batches
 
     def store_memory(self, state, action, log_prob, reward, value, done):
@@ -96,6 +95,7 @@ class Memory:
             self.actions,
             self.log_probs,
             self.rewards,
+            self.values,
             self.advantages
         )
 
@@ -142,23 +142,25 @@ class CriticNet():
     def __init__(self, input_dims, lr=0.0003):
 
         #tf.keras.initializers.HeUniform() migliore fino ad ora arriva a 300ep
-        initializer = tf.keras.initializers.HeNormal()
-        #initializer =  tf.keras.initializers.RandomUniform(minval=0.00005, maxval=0.07
-        #initializer =  tf.keras.initializers.TruncatedNormal(mean=0., stddev=0.5)
-        #initializer = tf.keras.initializers.HeUniform()
+
+        #initializer = tf.keras.initializers.HeNormal()
+
+        #initializer = tf.keras.initializers.GlorotUniform()
+        #initializer = tf.keras.initializers.GlorotNormal()
+
+
         #vedi altri su https://keras.io/api/layers/initializers/#henormal-class
-        #al link giù ho letto che funziona bene con he uniform ma non va oltre i 250 in realtà
+        #al link giù ho letto che funziona bene con he_uniform ma non va oltre i 250 in realtà
         # https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
+        initializer = tf.keras.initializers.HeUniform()
 
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
-
         out = layers.Dense(32, activation="relu",kernel_initializer=initializer)(inputs)
-        out = layers.Dense(32, activation="relu",kernel_initializer=initializer)(out)
-        out = layers.Dense(32, activation="relu",kernel_initializer=initializer)(out)
+        out = layers.Dense(32, activation="relu", kernel_initializer=initializer )(out)
         outputs = layers.Dense(1, activation="relu")(out)
 
-        self.optimizer = keras.optimizers.Adam(learning_rate=lr, clipvalue=0.5)
-
+        #clipnorm=1.
+        self.optimizer = keras.optimizers.Adam(learning_rate=lr, clipvalue= 0.5 )
         self.model = keras.Model(inputs, outputs, name="CriticNet")
 
     def save_checkpoint(self,path):
@@ -231,9 +233,9 @@ class Agent2:
 
     def act(self, state):
         dists = tf.convert_to_tensor ( self.actor.model(state) )
-        if np.isnan(dists).any():
-            print(dists)
-            sys.exit("Errore tornato nan dalla neural network actor ")
+        # if np.isnan(dists).any():
+        #     print(dists)
+        #     sys.exit("Errore tornato nan dalla neural network actor ")
 
         ret = self.samplingAction(dists)
 
@@ -279,25 +281,24 @@ class Agent2:
         # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
         return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-
+    @tf.function
     def train_actor_network(self, states, old_probs, advantages,actor_trainable_variables):
-
         #print("TRAINING Actor Net ", str(iter + 1))
         with tf.GradientTape() as tape:  # everithing here is recorded and released them.
             tape.watch(actor_trainable_variables)
             # forward step - TODO: seconda passata è corretto avere un altro campionamento?
             # print("states in input => ",states)
-            if np.isnan(states).any():
-                print(states)
-                sys.exit("ACTOR :: states is nan exiting ...")
+            # if np.isnan(states).any():
+            #     print(states)
+            #     sys.exit("ACTOR :: states is nan exiting ...")
             _, new_probs = self.act(states)
 
             # print("new_probs ", new_probs)
             # compute loss
             prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
-            if np.isnan(prob_ratio).any():
-                print(prob_ratio)
-                sys.exit("ACTOR :: prob_ratio is nan exiting ...")
+            # if np.isnan(prob_ratio).any():
+            #     print(prob_ratio)
+            #     sys.exit("ACTOR :: prob_ratio is nan exiting ...")
 
             min_advantage = tf.where(
                 advantages > 0,
@@ -320,25 +321,25 @@ class Agent2:
         #print("grads ACTOR= ", grads)
         self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
 
-
-    def train_critic_network(self,states, rewards,critic_trainable_variables):
+    @tf.function
+    def train_critic_network(self,states, old_vals ,critic_trainable_variables):
         with tf.GradientTape() as tape:
             tape.watch(critic_trainable_variables)
 
-            if np.isnan(states).any():
-                print(states)
-                sys.exit("CRITIC :: states is nan exiting ...")
+            # if np.isnan(states).any():
+            #     print(states)
+            #     sys.exit("CRITIC :: states is nan exiting ...")
 
             xx = self.critic.model(states)
-            if (np.isnan(xx)).any():
-                print("xx is nan ? ", xx)
-                sys.exit("CRITIC :: xx is nan exiting ...")
+            # if (np.isnan(xx)).any():
+            #     print("xx is nan ? ", xx)
+            #     sys.exit("CRITIC :: xx is nan exiting ...")
 
             new_vals = tf.convert_to_tensor(xx)
             #print("new vals ",new_vals)
 
             # forward and loss calculation
-            value_loss = tf.reduce_mean((rewards - new_vals) ** 2)
+            value_loss = tf.reduce_mean((old_vals - new_vals) ** 2)
             #print(" V ",value_loss)
 
         # print("value _loss ", value_loss)
@@ -350,7 +351,7 @@ class Agent2:
 
     def learn(self, training_iteration):
         # get stored elements
-        states, actions, dists_probs, rewards, advantages = self.memory.get()
+        states, actions, dists_probs, rewards,vals, advantages = self.memory.get()
 
         # some preprocessing of saved data
         # expected a tensor like this: tf.Tensor([ [], [], ... )
@@ -365,7 +366,7 @@ class Agent2:
 
         critic_trainable_variables = self.critic.model.trainable_variables
         for iter in range(training_iteration):
-            self.train_critic_network(states,rewards,critic_trainable_variables)
+            self.train_critic_network(states,vals,critic_trainable_variables)
 
 
     def summary(self,n_epoche):

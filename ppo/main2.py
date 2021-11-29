@@ -112,10 +112,7 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
             action, dists = agent.act(current_state)
 
             if np.isnan(action).any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
-                print(x.any())
                 sys.exit("np.isnan (action ) ")
-                action, dists = agent.act(current_state)
-
 
             v_value = agent.critic.model(current_state)
             observation, reward, done = env.step(action)
@@ -144,7 +141,7 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
         #print(" C LOSS =", c_loss)
         #print(" Epoch: ",ep + 1, "Number of episodes :",num_episodes, " Average Reward ",np.mean(episodic_reward_list))
 
-        if (ep+1) % 10 == 0:
+        if (ep+1) % 3 == 0:
             agent.save_models(pathB)
 
     return agent
@@ -156,13 +153,13 @@ pathB = "saved_model"
 
 if __name__ == '__main__':
 
-    # gpus = tf.config.list_physical_devices('GPU')
+    #gpus = tf.config.list_physical_devices('GPU')
     # if gpus:
     #     #Restrict TensorFlow to only allocate 1GB of memory on the first GPU
     #     try:
     #          tf.config.set_logical_device_configuration(
     #              gpus[0],
-    #              [tf.config.LogicalDeviceConfiguration(memory_limit=7680)])
+    #              [tf.config.LogicalDeviceConfiguration(memory_limit=7680)]) #7.5 GB
     #          logical_gpus = tf.config.list_logical_devices('GPU')
     #          print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
     #     except RuntimeError as e:
@@ -177,11 +174,11 @@ if __name__ == '__main__':
     state_dim = 5  # we reduce the state dim through observation (see below)
     num_actions = 2  # acceleration and steering
 
-    alpha= 0.0001,0.0001 # learning rate: il primo è actor, il secondo è critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
+    alpha=  3e-4,1e-3 # learning rates: il primo è actor, il secondo è critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
 
-
+    #il critico crasha, l'attore no. dobbiamo concentrarci di volta in volta
     # 1 is true, 0 is false
-    doTrain = 0
+    doTrain = 1
     doRace = 1
 
     #accumulator params for tests
@@ -189,9 +186,9 @@ if __name__ == '__main__':
     steps, rewards = [], []
 
     #training params come in cartpole: poche epoche, 80 train_iteration e 40000 steps
-    n_epochs = 20
-    steps_per_epoch = 250
-    train_iteration = 100
+    n_epochs = 6 #massimo 30 epoche è suggerito come range
+    steps_per_epoch = 4000 #con 1000 va. nei papers sono suggeriti  4 to 4096
+    train_iteration = 80
 
     ##race params
     number_of_races = 50
@@ -203,21 +200,19 @@ if __name__ == '__main__':
     # steps, rewards = new_race(env, agent, races=number_of_races)
     # print_results(steps, rewards)
 
+
+#https://rishy.github.io/ml/2017/01/05/how-to-train-your-dnn/
+
     if doTrain:
-        t = time.process_time()
-        agent = training_agent(env, agent, n_epochs=n_epochs, steps_per_epoch=steps_per_epoch,
-                               train_iteration=train_iteration)
-        elapsed_time = time.process_time() - t
-
-       # agent.summary(n_epochs)
-
-        # do some stuff
-        # try:
-        #     # Specify an valid GPU device
-        #     with tf.device('/GPU:0'):
-        #
-        # except RuntimeError as e:
-        #     print(e)
+        try:
+            # Specify an valid GPU device
+            #with tf.device('/GPU:0'):
+                t = time.process_time()
+                agent = training_agent(env, agent, n_epochs=n_epochs, steps_per_epoch=steps_per_epoch,
+                                       train_iteration=train_iteration)
+                elapsed_time = time.process_time() - t
+        except RuntimeError as e:
+            print(e)
 
 
     if doRace:
