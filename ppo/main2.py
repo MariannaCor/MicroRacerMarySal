@@ -1,9 +1,10 @@
 import sys
 import time
+import os
+import gc
 
 import numpy as np
 import tensorflow as tf
-import gc
 
 import tracks
 from ppo.Agent2 import Agent2
@@ -87,7 +88,7 @@ def print_results(steps, rewards):
 
 def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=20):
 
-    #for advantage computation
+    #params for advantage and return computation
     gamma = 0.99
     lam = 0.97
 
@@ -98,51 +99,41 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
     observation = env.reset()
     state = fromObservationToModelState(observation)
 
-    episodic_reward_list = []
 
     for ep in range(n_epochs):
-        num_episodes=0
-        current_state = state
-        episodic_reward = 0
         print(ep+1, " EPOCH")
         gc.collect() #ogni cosa che non è puntanta viene cancellata
-        agent.clean_memory() #pulisco la memoria.
+
+        print("Collecting new episodes")
         for t in range(steps_per_epoch):
-            #print("t step is "+str(t)+"in ep "+str(ep + 1))
-            action, dists = agent.act(current_state)
+            #take a step into the environment
+            action, dists = agent.act(state)
 
             if np.isnan(action).any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
-                sys.exit("np.isnan (action ) ")
-
-            v_value = agent.critic.model(current_state)
+                sys.exit("np.isnan (action) ")
             observation, reward, done = env.step(action)
 
-            agent.remember(current_state, action, dists, reward, v_value, done)
-            episodic_reward +=reward
+            #get the value of the critic
+            v_value = agent.critic.model(state)
+            agent.remember(state, action, dists, reward, v_value, done)
+            #episodic_reward +=reward
 
             #set the new state as current
-            current_state = fromObservationToModelState(observation)
+            state = fromObservationToModelState(observation)
             #set terminal condition
             terminal = done
             # if The trajectory reached to a terminal state or the expected number we stop moving and we calculate advantage
             if terminal or (t == steps_per_epoch - 1):
-                last_value = 0 if done else agent.critic.model(current_state)
-                agent.calculate_advantages(last_value,gamma,lam)
-                num_episodes += 1
-                #print("New Episode Starts. It's number: ", num_episodes)
-                current_state = fromObservationToModelState(env.reset())
-                episodic_reward_list.append(episodic_reward)
-                episodic_reward=0
+                last_value = 0 if done else agent.critic.model(state)
+                agent.finish_trajectory(last_value,gamma,lam)
+                #we reset env only when the episodes is over or the memory is full
+                state = fromObservationToModelState(env.reset())
 
         agent.learn(training_iteration=train_iteration)
 
-        agent.clean_memory()
-        #print(" A LOSS =",a_loss)
-        #print(" C LOSS =", c_loss)
-        #print(" Epoch: ",ep + 1, "Number of episodes :",num_episodes, " Average Reward ",np.mean(episodic_reward_list))
-
         if (ep+1) % 3 == 0:
             agent.save_models(pathB)
+
 
     return agent
 
@@ -153,78 +144,67 @@ pathB = "saved_model"
 
 if __name__ == '__main__':
 
-    #gpus = tf.config.list_physical_devices('GPU')
-    # if gpus:
-    #     #Restrict TensorFlow to only allocate 1GB of memory on the first GPU
-    #     try:
-    #          tf.config.set_logical_device_configuration(
-    #              gpus[0],
-    #              [tf.config.LogicalDeviceConfiguration(memory_limit=7680)]) #7.5 GB
-    #          logical_gpus = tf.config.list_logical_devices('GPU')
-    #          print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-    #     except RuntimeError as e:
-    #          # Virtual devices must be set before GPUs have been initialized
-    #          print(e)
-
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        try:
+            # Currently, memory growth needs to be the same across GPUs
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            logical_gpus = tf.config.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            # Memory growth must be set before GPUs have been initialized
+            print(e)
 
     print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
     print("tf.version = ", tf.version.VERSION)
 
+    # accumulator params for tests
+    elapsed_time = 0
+    steps, rewards = [], []
+
+    #environment initialization
     env = tracks.Racer()
-    state_dim = 5  # we reduce the state dim through observation (see below)
-    num_actions = 2  # acceleration and steering
 
-    alpha=  3e-4,1e-3 # learning rates: il primo è actor, il secondo è critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
-
-    #il critico crasha, l'attore no. dobbiamo concentrarci di volta in volta
     # 1 is true, 0 is false
     doTrain = 1
     doRace = 1
 
-    #accumulator params for tests
-    elapsed_time = 0
-    steps, rewards = [], []
+   #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
+    n_epochs = 30 #massimo 30 epoche è suggerito come range
+    steps_per_epoch = 4000 #con 3000 va. nei papers sono suggeriti  4 to 4096
+    train_iteration = 100
 
-    #training params come in cartpole: poche epoche, 80 train_iteration e 40000 steps
-    n_epochs = 6 #massimo 30 epoche è suggerito come range
-    steps_per_epoch = 4000 #con 1000 va. nei papers sono suggeriti  4 to 4096
-    train_iteration = 80
+    # lr_actor,lr_critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
+    learning_rates = 0.00003, 0.0003
 
-    ##race params
+    agent = Agent2(
+        load_models=False,
+        path_saving_model = pathA,
+        state_dimension = 5,
+        num_action = 2 ,
+        alpha = learning_rates,
+        size_memory = steps_per_epoch
+    )
+
+    #race params
     number_of_races = 50
-
-    agent = Agent2(load_models=False,path_saving_model=pathA, state_dimension=state_dim,  alpha=alpha )
-
-    #if doRace:
-    # stepsA, rewardsA = new_race(env, agent, races=number_of_races)
-    # steps, rewards = new_race(env, agent, races=number_of_races)
-    # print_results(steps, rewards)
-
-
-#https://rishy.github.io/ml/2017/01/05/how-to-train-your-dnn/
-
+    # https://rishy.github.io/ml/2017/01/05/how-to-train-your-dnn/
     if doTrain:
         try:
-            # Specify an valid GPU device
+            #scommentare per eseguire con GPU
             #with tf.device('/GPU:0'):
                 t = time.process_time()
-                agent = training_agent(env, agent, n_epochs=n_epochs, steps_per_epoch=steps_per_epoch,
-                                       train_iteration=train_iteration)
+                agent = training_agent(env, agent, n_epochs=n_epochs, steps_per_epoch=steps_per_epoch, train_iteration=train_iteration)
                 elapsed_time = time.process_time() - t
         except RuntimeError as e:
             print(e)
-
 
     if doRace:
         agent.load_models(pathB)
         steps,rewards = new_race(env,agent,races=number_of_races)
 
-    #print("\nSummary of the " + str(number_of_races) + " races : \n")
-    #print("Total Reward => ", rewardsA)
-    #print("Steps done for race => ", stepsA)
-    #print("Mean Reward : ", np.mean(rewardsA))
-    #print("Mean Step Number : ", np.mean(stepsA))
-
+    #----PRINTING RESULTS-----------
     print("\nTest Completed\n\nTraining Summary\n")
     print("epoch number : " + str(n_epochs) + " steps_per_epoch " + str(steps_per_epoch) + " train_iteration " + str(train_iteration))
     print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)

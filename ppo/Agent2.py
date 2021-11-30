@@ -3,7 +3,7 @@ import math
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.stats as stats
+
 import scipy.signal
 import tensorflow as tf
 
@@ -12,92 +12,62 @@ from tensorflow.keras import layers
 
 
 class Memory:
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.log_probs = []
-        self.rewards = []
-        self.values = []
-        self.advantages = []
-        self.dones = []
-        self.index, self.trajectory_start_index = 0, 0
+    def __init__(self,size, state_dim, num_action):
+        #shape = (col,righe) or (righe,colonne), size deve essere il numero di colonne ...  ?
+        self.states  = np.zeros(shape=(size,state_dim) , dtype=np.float32)
+        self.actions = np.zeros(shape=(size,num_action) , dtype=np.float32)
+        self.log_probs = np.zeros(size , dtype=np.float32)
+        self.rewards = np.zeros(size , dtype=np.float32)    #quella che ritorna l'environment
+        self.values = np.zeros(size , dtype=np.float32)     #quella che ritorna il critico
+        self.dones = np.zeros(size , dtype=np.float32)      #se l'episodio è finito
 
+        self.advantages= np.zeros(size , dtype=np.float32) #quella che mi serve per calcolare l'actor_loss
+        self.returns  = np.zeros(size , dtype=np.float32) #quella che mi serve per calcolare il critic loss
 
+        self.pointer, self.trajectory_start_index = 0, 0
 
-    def generate_batches(self):
-        print("generates bathces ")
-        n_states = len(self.states)
-        # numpy.arrange([start, ]stop, [step, ], dtype = None) -> numpy.ndarray
-        # es np.arange(0,10,2,float)  -> [0. 2. 4. 6. 8.]
-        batch_start = np.arange(0, n_states, 50)
-        print("batch_start = ", batch_start)
-        indices = np.arange(n_states, dtype=np.int64)
-        print("indices =", indices)
-        np.random.shuffle(indices)
-        batches = [indices[i:i + self.chunk_size] for i in batch_start]
-        print("batches =", batches)
-
-        return np.array(self.states), \
-               np.array(self.actions), \
-               np.array(self.log_probs), \
-               np.array(self.rewards), \
-               np.array(self.values), \
-               np.array(self.advantages), \
-               batches
 
     def store_memory(self, state, action, log_prob, reward, value, done):
-        self.states.append(state)
-        self.actions.append(action)
-        self.log_probs.append(log_prob)
-        self.rewards.append(reward)
-        self.values.append(value)
-        self.dones.append(done)
-        self.index += 1
-
-    def clear_memory(self):
-        #print("clearing memory")
-        self.states = []
-        self.actions = []
-        self.log_probs = []
-        self.rewards = []
-        self.advantages = []
-        self.values = []
-        self.dones = []
-
-
-    # # mancano advantage e logprobs
-    # def summary(self):
-    #      sss = ""
-    #      for i in range(len(self.states)):
-    #          sss += str(i) + " [\n" \
-    #               "\t" + str(self.states[i][0]) + ",\n" \
-    #               "\t" + str(self.actions[i]) + ",\n" \
-    #               "\t" + str( self.rewards[i]) + ",\n" \
-    #               "\t" + str(self.values[i]) + ",\n" \
-    #               "\t" + str(self.log_probs[i]) + ",\n" \
-    #               "\t" + str(
-    #              self.dones[i]) + " ]\n\n"
-    #      print(sss)
-
+        self.states[self.pointer] = state
+        self.actions[self.pointer] = action
+        self.log_probs[self.pointer] = log_prob
+        self.rewards[self.pointer] = reward
+        self.values[self.pointer] = value
+        self.dones[self.pointer] = done
+        self.pointer += 1
 
 
     def get(self):
         # Get all data of the buffer and normalize the advantages
-        self.index, self.trajectory_start_index = 0, 0
-        advantage_mean, advantage_std = (
-            np.mean(self.advantages),
-            np.std(self.advantages),
-        )
+        self.pointer, self.trajectory_start_index = 0, 0
+        advantage_mean = np.mean(self.advantages)
+        advantage_std = np.std(self.advantages)
         self.advantages = (self.advantages - advantage_mean) / advantage_std
-        # order is important!: states,actions,dists_probs, rewards, advantages
+
         return (
             self.states,
-            self.actions,
             self.log_probs,
-            self.rewards,
-            self.values,
-            self.advantages
+            self.advantages,
+            self.returns
         )
+
+    # def get(self):
+    #     # Get all data of the buffer and normalize the advantages
+    #     self.index, self.trajectory_start_index = 0, 0
+    #     advantage_mean, advantage_std = (
+    #         np.mean(self.advantages),
+    #         np.std(self.advantages),
+    #     )
+    #     self.advantages = (self.advantages - advantage_mean) / advantage_std
+    #     # order is important!: states,actions,dists_probs, rewards, advantages
+    #     return (
+    #         self.states,
+    #         self.actions,
+    #         self.log_probs,
+    #         self.rewards,
+    #         self.values,
+    #         self.advantages
+    #     )
 
 
 class ActorNet():
@@ -132,7 +102,7 @@ class ActorNet():
         outputs = layers.concatenate([mu_acc_out, var_acc_out, mu_dir_out, var_dir_out])
 
         self.model = keras.Model(inputs, outputs, name="ActorNet")
-        self.optimizer = keras.optimizers.Adam(learning_rate=lr)
+        self.optimizer = keras.optimizers.Adam(learning_rate=lr,clipvalue= 0.5 )
 
     def save_checkpoint(self, path):
         self.model.save(path)
@@ -141,15 +111,7 @@ class ActorNet():
 class CriticNet():
     def __init__(self, input_dims, lr=0.0003):
 
-        #tf.keras.initializers.HeUniform() migliore fino ad ora arriva a 300ep
-
-        #initializer = tf.keras.initializers.HeNormal()
-
-        #initializer = tf.keras.initializers.GlorotUniform()
-        #initializer = tf.keras.initializers.GlorotNormal()
-
-
-        #vedi altri su https://keras.io/api/layers/initializers/#henormal-class
+        #vedi altri initializers su https://keras.io/api/layers/initializers/#henormal-class
         #al link giù ho letto che funziona bene con he_uniform ma non va oltre i 250 in realtà
         # https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
         initializer = tf.keras.initializers.HeUniform()
@@ -170,16 +132,17 @@ class CriticNet():
 
 class Agent2:
 
-    def __init__(self, state_dimension, path_saving_model ,alpha=3e-4, load_models=False, ):
+    def __init__(self, state_dimension, num_action, alpha, size_memory, path_saving_model ,load_models=False , ):
 
-        lrActor,lrCritic = alpha
-        self.state_dimension = state_dimension
-        self.memory = Memory()
+        lr_actor , lr_critic  = alpha
 
-        self.actor = ActorNet(input_dims=state_dimension, lr=lrActor)
+        #self.state_dimension = state_dimension
+        self.memory = Memory(size=size_memory, state_dim=state_dimension, num_action=num_action)
+
+        self.actor = ActorNet(input_dims=state_dimension, lr=lr_actor)
         self.actor.model.compile(optimizer=self.actor.optimizer)
 
-        self.critic = CriticNet(input_dims=state_dimension, lr=lrCritic)
+        self.critic = CriticNet(input_dims=state_dimension, lr=lr_critic)
         self.critic.model.compile(optimizer=self.critic.optimizer)
 
         if load_models:
@@ -247,126 +210,93 @@ class Agent2:
     def clean_memory(self):
         self.memory.clear_memory()
 
-    # def summary(self):
-    #     print("The Agent is now working:\n")
-    #     print("memory\n")
-    #     self.memory.summary()
-    #     plt.plot(self.actor_loss_accumulator, label="actor_loss_accumulator")
-    #     plt.plot(self.critic_loss_accumulator, label="critic_loss_accumulator")
-    #     # show a legend on the plot
-    #     plt.legend()
-    #     # function to show the plot
-    #     plt.show()
-    #
-    #     # ..other information will be added later
-    #     # self.actor.summary()
 
 
-    #@tf.function
-    def calculate_advantages(self, last_value=0, gamma=0.99, lam=0.95):
-        # Finish the trajectory by computing advantage estimates and rewards-to-go
-        path_slice = slice(self.memory.trajectory_start_index, self.memory.index)
+    def finish_trajectory(self, last_value=0 ,gamma=0.99, lam=0.95):
+
+        #we declare this inner function to reuse it two times.
+        def discounted_cumulative_sums(x, discount):
+            # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
+            return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+
+        # Finish the trajectory by computing advantage estimates and rewards-to-go to
+        path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer)
         rewards = np.append(self.memory.rewards[path_slice], last_value)
         values = np.append(self.memory.values[path_slice], last_value)
-        #print("rewards", rewards)
-        #print("values", values)
-        # è una lista di tutti gli delta-i consiste in una serie di passate dall'elemento i fino alla fine dell'array.
-        deltas = rewards[:-1] + (gamma * values[1:]) - values[:-1]
-        # print("DELTAS = ", deltas)
-        self.memory.advantages[path_slice] = self.discounted_cumulative_sums(deltas, gamma * lam)
-        self.memory.rewards[path_slice] = self.discounted_cumulative_sums(rewards, gamma)[:-1]
-        self.memorytrajectory_start_index = self.memory.index
+        deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
+        self.memory.advantages[path_slice] = discounted_cumulative_sums(deltas, gamma * lam)
+        self.memory.returns[path_slice] = discounted_cumulative_sums(rewards, gamma )[:-1]
+        self.memory.trajectory_start_index = self.memory.pointer
 
-    def discounted_cumulative_sums(self, x, discount):
-        # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
-        return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
     @tf.function
     def train_actor_network(self, states, old_probs, advantages,actor_trainable_variables):
-        #print("TRAINING Actor Net ", str(iter + 1))
+
         with tf.GradientTape() as tape:  # everithing here is recorded and released them.
             tape.watch(actor_trainable_variables)
             # forward step - TODO: seconda passata è corretto avere un altro campionamento?
-            # print("states in input => ",states)
-            # if np.isnan(states).any():
-            #     print(states)
-            #     sys.exit("ACTOR :: states is nan exiting ...")
             _, new_probs = self.act(states)
-
-            # print("new_probs ", new_probs)
             # compute loss
-            prob_ratio = tf.math.divide(tf.exp(new_probs), tf.exp(old_probs))
-            # if np.isnan(prob_ratio).any():
-            #     print(prob_ratio)
-            #     sys.exit("ACTOR :: prob_ratio is nan exiting ...")
+            prob_ratio = tf.math.exp(new_probs - old_probs )
 
             min_advantage = tf.where(
                 advantages > 0,
                 (1 + .2) * advantages,
                 (1 - .2) * advantages,
             )
-            min_advantage = tf.cast(min_advantage, tf.float32)
-            advantages = tf.cast(advantages, tf.float32)
             partial = tf.math.multiply(prob_ratio, advantages)
-            # print("#p1 ", partial)
             partial = tf.math.minimum(partial, min_advantage)
-            #print("#p2 ", partial)
             partial = tf.reduce_mean(partial)
-            #print("#p3 ", partial)
             actor_loss = tf.math.negative(partial)
-            #print("A ", actor_loss)
 
         grads = tape.gradient(actor_loss, actor_trainable_variables)
-        # print("grads len = ", len( grads))
-        #print("grads ACTOR= ", grads)
         self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
 
+        _,updated_probs = self.act(states)
+        kl = tf.reduce_mean(
+            old_probs
+            - updated_probs,
+        )
+        kl = tf.reduce_sum(kl)
+        return kl
+
     @tf.function
-    def train_critic_network(self,states, old_vals ,critic_trainable_variables):
+    def train_critic_network(self,states, returns ,critic_trainable_variables):
         with tf.GradientTape() as tape:
             tape.watch(critic_trainable_variables)
+            new_vals = tf.convert_to_tensor(self.critic.model(states))
+            value_loss = tf.reduce_mean((returns - new_vals) ** 2)
 
-            # if np.isnan(states).any():
-            #     print(states)
-            #     sys.exit("CRITIC :: states is nan exiting ...")
-
-            xx = self.critic.model(states)
-            # if (np.isnan(xx)).any():
-            #     print("xx is nan ? ", xx)
-            #     sys.exit("CRITIC :: xx is nan exiting ...")
-
-            new_vals = tf.convert_to_tensor(xx)
-            #print("new vals ",new_vals)
-
-            # forward and loss calculation
-            value_loss = tf.reduce_mean((old_vals - new_vals) ** 2)
-            #print(" V ",value_loss)
-
-        # print("value _loss ", value_loss)
         grads = tape.gradient(value_loss, critic_trainable_variables)
-        # print("grads len = ", len(grads))
-        #print("grads CRITIC ", grads)
         self.critic.optimizer.apply_gradients(zip(grads, critic_trainable_variables))
 
 
     def learn(self, training_iteration):
         # get stored elements
-        states, actions, dists_probs, rewards,vals, advantages = self.memory.get()
-
+        states, log_probs, advantages ,returns = self.memory.get()
         # some preprocessing of saved data
-        # expected a tensor like this: tf.Tensor([ [], [], ... )
-        states = tf.squeeze(tf.convert_to_tensor(states),
-                            axis=1)  # cosi puoi dare in pasto alla rete tutto l'array di stati in un unico colpo.
-        old_probs = tf.convert_to_tensor(dists_probs)
-        actor_trainable_variables = self.actor.model.trainable_variables
+        # expected tensors like this: tf.Tensor([ [], [], ... )
+        states = tf.convert_to_tensor(states)  # float32
+        old_probs = tf.convert_to_tensor(log_probs ) #float32
 
         # train actor network
+        print("Training actor")
+        actor_trainable_variables = self.actor.model.trainable_variables
+        target_kl = 1.5 * 0.1
         for iter in range(training_iteration):
-            self.train_actor_network(states,old_probs,advantages,actor_trainable_variables)
+            kl = self.train_actor_network( states, old_probs, advantages, actor_trainable_variables )
+            if kl > target_kl:
+                # Early Stopping
+                print("Early Stopping")
+                print("kl = {a} > {b} ".format(a=kl,b=target_kl) )
+                break
 
+
+        print("Training critic")
         critic_trainable_variables = self.critic.model.trainable_variables
         for iter in range(training_iteration):
-            self.train_critic_network(states,vals,critic_trainable_variables)
+            self.train_critic_network(states,returns,critic_trainable_variables)
+
 
 
     def summary(self,n_epoche):
