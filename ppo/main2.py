@@ -4,7 +4,9 @@ import os
 import gc
 
 import numpy as np
+
 import tensorflow as tf
+
 
 import tracks
 from ppo.Agent2 import Agent2
@@ -86,14 +88,11 @@ def print_results(steps, rewards):
     print("###################################")
 
 
-def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=20):
+def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target_kl):
 
-    #params for advantage and return computation
+    #params for advantage and return computation...
     gamma = 0.99
     lam = 0.97
-
-    #for learning
-    policy_clip = 0.2
 
     ##initialization
     observation = env.reset()
@@ -106,6 +105,10 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
 
         print("Collecting new episodes")
         for t in range(steps_per_epoch):
+
+            if (t+1)% 1000 == 0:
+                print("collected {} episodes".format(t+1))
+
             #take a step into the environment
             action, dists = agent.act(state)
 
@@ -129,9 +132,9 @@ def training_agent(env,agent, n_epochs=20, steps_per_epoch=20, train_iteration=2
                 #we reset env only when the episodes is over or the memory is full
                 state = fromObservationToModelState(env.reset())
 
-        agent.learn(training_iteration=train_iteration)
+        agent.learn(training_iteration=train_iteration,target_kl=target_kl)
 
-        if (ep+1) % 3 == 0:
+        if (ep+1) % 2 == 0:
             agent.save_models(pathB)
 
 
@@ -144,74 +147,83 @@ pathB = "saved_model"
 
 if __name__ == '__main__':
 
-    gpus = tf.config.list_physical_devices('GPU')
-    if gpus:
-        try:
-            # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-            logical_gpus = tf.config.list_logical_devices('GPU')
-            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-        except RuntimeError as e:
-            # Memory growth must be set before GPUs have been initialized
-            print(e)
+    with tf.device("/CPU:0"):
+        device_name = tf.test.gpu_device_name()
+        if device_name == '/device:GPU:0':
+            print("Using a GPU")
+        else:
+            print("Using a CPU")
 
-    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-    print("tf.version = ", tf.version.VERSION)
 
-    # accumulator params for tests
-    elapsed_time = 0
-    steps, rewards = [], []
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            try:
+                # Currently, memory growth needs to be the same across GPUs
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                logical_gpus = tf.config.list_logical_devices('GPU')
+                print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+            except RuntimeError as e:
+                # Memory growth must be set before GPUs have been initialized
+                print(e)
 
-    #environment initialization
-    env = tracks.Racer()
+        #scommentare per eseguire con gpu mettere G al posto di C
 
-    # 1 is true, 0 is false
-    doTrain = 1
-    doRace = 1
 
-   #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
-    n_epochs = 30 #massimo 30 epoche è suggerito come range
-    steps_per_epoch = 4000 #con 3000 va. nei papers sono suggeriti  4 to 4096
-    train_iteration = 100
+        print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+        print("tf.version = ", tf.version.VERSION)
 
-    # lr_actor,lr_critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
-    learning_rates = 0.00003, 0.0003
+        # accumulator params for tests
+        elapsed_time = 0
+        steps, rewards = [], []
 
-    agent = Agent2(
-        load_models=False,
-        path_saving_model = pathA,
-        state_dimension = 5,
-        num_action = 2 ,
-        alpha = learning_rates,
-        size_memory = steps_per_epoch
-    )
+        #environment initialization
+        env = tracks.Racer()
 
-    #race params
-    number_of_races = 50
-    # https://rishy.github.io/ml/2017/01/05/how-to-train-your-dnn/
-    if doTrain:
-        try:
-            #scommentare per eseguire con GPU
-            #with tf.device('/GPU:0'):
+        # 1 is true, 0 is false
+        doTrain = 1
+        doRace = 1
+
+        #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
+        n_epochs = 5 #massimo 30 epoche è suggerito come range
+        steps_per_epoch = 20  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
+        train_iteration = 100
+
+        # lr_actor,lr_critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
+        learning_rates = 0.0003, 0.0003
+        target_kl = 1.5 * 0.1
+        agent = Agent2(
+            load_models=False,
+            path_saving_model = pathA,
+            state_dimension = 5,
+            num_action = 2 ,
+            alpha = learning_rates,
+            size_memory = steps_per_epoch
+        )
+
+        #race params
+        number_of_races = 50
+        # https://rishy.github.io/ml/2017/01/05/how-to-train-your-dnn/
+        if doTrain:
+             try:
                 t = time.process_time()
-                agent = training_agent(env, agent, n_epochs=n_epochs, steps_per_epoch=steps_per_epoch, train_iteration=train_iteration)
+                agent = training_agent(env, agent, n_epochs=n_epochs, steps_per_epoch=steps_per_epoch, train_iteration=train_iteration, target_kl=target_kl)
                 elapsed_time = time.process_time() - t
-        except RuntimeError as e:
-            print(e)
+             except RuntimeError as e:
+                print(e)
 
-    if doRace:
-        agent.load_models(pathB)
-        steps,rewards = new_race(env,agent,races=number_of_races)
+        if doRace:
+            agent.load_models(pathB)
+            steps,rewards = new_race(env,agent,races=number_of_races)
 
-    #----PRINTING RESULTS-----------
-    print("\nTest Completed\n\nTraining Summary\n")
-    print("epoch number : " + str(n_epochs) + " steps_per_epoch " + str(steps_per_epoch) + " train_iteration " + str(train_iteration))
-    print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)
+        #----PRINTING RESULTS-----------
+        print("\nTest Completed\n\nTraining Summary\n")
+        print("epoch number : " + str(n_epochs) + " steps_per_epoch " + str(steps_per_epoch) + " train_iteration " + str(train_iteration))
+        print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)
 
-    print("\nSummary of the " + str(number_of_races) + " races : \n")
-    print("Total Reward => ", rewards)
-    print("Steps done for race => ", steps)
-    print("Mean Reward : ", np.mean(rewards))
-    print("Mean Step Number : ", np.mean(steps))
+        print("\nSummary of the " + str(number_of_races) + " races : \n")
+        print("Total Reward => ", rewards)
+        print("Steps done for race => ", steps)
+        print("Mean Reward : ", np.mean(rewards))
+        print("Mean Step Number : ", np.mean(steps))
 
