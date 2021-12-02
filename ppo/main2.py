@@ -4,10 +4,7 @@ import os
 import gc
 
 import numpy as np
-
 import tensorflow as tf
-
-
 import tracks
 from ppo.Agent2 import Agent2
 
@@ -98,14 +95,12 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
     observation = env.reset()
     state = fromObservationToModelState(observation)
 
-
     for ep in range(n_epochs):
         print(ep+1, " EPOCH")
         gc.collect() #ogni cosa che non è puntanta viene cancellata
 
         print("Collecting new episodes")
         for t in range(steps_per_epoch):
-
             if (t+1)% 1000 == 0:
                 print("collected {} episodes".format(t+1))
 
@@ -114,13 +109,11 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
 
             if np.isnan(action).any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
                 sys.exit("np.isnan (action) ")
-            observation, reward, done = env.step(action)
 
+            observation, reward, done = env.step(action)
             #get the value of the critic
             v_value = agent.critic.model(state)
             agent.remember(state, action, dists, reward, v_value, done)
-            #episodic_reward +=reward
-
             #set the new state as current
             state = fromObservationToModelState(observation)
             #set terminal condition
@@ -132,6 +125,7 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
                 #we reset env only when the episodes is over or the memory is full
                 state = fromObservationToModelState(env.reset())
 
+        #gc.collect()
         agent.learn(training_iteration=train_iteration,target_kl=target_kl)
 
         if (ep+1) % 2 == 0:
@@ -141,13 +135,12 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
     return agent
 
 #global variables
-
 pathA = "saved_model"
 pathB = "saved_model"
 
 if __name__ == '__main__':
 
-    with tf.device("/CPU:0"):
+    #with tf.device("/CPU:0"):
         device_name = tf.test.gpu_device_name()
         if device_name == '/device:GPU:0':
             print("Using a GPU")
@@ -167,9 +160,6 @@ if __name__ == '__main__':
                 # Memory growth must be set before GPUs have been initialized
                 print(e)
 
-        #scommentare per eseguire con gpu mettere G al posto di C
-
-
         print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
         print("tf.version = ", tf.version.VERSION)
 
@@ -185,8 +175,8 @@ if __name__ == '__main__':
         doRace = 1
 
         #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
-        n_epochs = 5 #massimo 30 epoche è suggerito come range
-        steps_per_epoch = 20  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
+        n_epochs = 6 #massimo 30 epoche è suggerito come range
+        steps_per_epoch = 2000  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
         train_iteration = 100
 
         # lr_actor,lr_critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
