@@ -82,25 +82,25 @@ class ActorNet():
         train_dir = True
 
        # initializer = tf.keras.initializers.GlorotUniform(seed=None)
-        initializer = tf.keras.initializers.HeUniform()
+        relu_initializer =  tf.keras.initializers.LecunNormal()
 
-        inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
+        inputs = keras.Input(shape=[input_dims,], dtype=tf.float32)
 
         # tower of acceleration
-        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=initializer )(inputs)
-        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=initializer )(out1)
+        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=relu_initializer )(inputs)
+        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=relu_initializer )(out1)
 
         # mu,var of accelleration
         mu_acc_out = layers.Dense(1, activation='tanh', trainable=train_acc, kernel_initializer=tf.keras.initializers.zeros() )(out1)
-        var_acc_out = layers.Dense(1, activation='relu', trainable=train_acc,kernel_initializer=tf.keras.initializers.ones() )(out1)
+        var_acc_out = layers.Dense(1, activation='relu', trainable=train_acc,kernel_initializer=relu_initializer )(out1)
 
         # tower of direction
-        out2 = layers.Dense(32, activation="relu", trainable=train_dir, kernel_initializer=initializer)(inputs)
-        out2 = layers.Dense(32, activation="relu", trainable=train_dir , kernel_initializer=initializer)(out2)
+        out2 = layers.Dense(32, activation="relu", trainable=train_dir, kernel_initializer=relu_initializer)(inputs)
+        out2 = layers.Dense(32, activation="relu", trainable=train_dir , kernel_initializer=relu_initializer)(out2)
 
         # mu,var of direction
         mu_dir_out = layers.Dense(1, activation='tanh', trainable=train_dir, kernel_initializer=tf.keras.initializers.zeros() )(out2)
-        var_dir_out = layers.Dense(1, activation='relu', trainable=train_dir, kernel_initializer=tf.keras.initializers.ones() )(out2)
+        var_dir_out = layers.Dense(1, activation='relu', trainable=train_dir, kernel_initializer=relu_initializer )(out2)
         #tanh torna sempre un valore di range fra -1 e +1 ed è inizializzata a 0 come primo valore medio.
         #softplus(x) = log(exp(x) + 1) quindi torna un valore compreso nel range [0,inf] e ci fa comodo perchè stima
         #la dev standard. Esso viene inizializzato ad 1.
@@ -119,7 +119,7 @@ class CriticNet():
         #vedi altri initializers su https://keras.io/api/layers/initializers/#henormal-class
         #al link giù ho letto che funziona bene con he_uniform ma non va oltre i 250 in realtà
         # https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
-        initializer = tf.keras.initializers.HeUniform()
+        initializer = tf.keras.initializers.zeros()
 
         inputs = keras.Input(shape=[input_dims, ], dtype=tf.float32)
         out = layers.Dense(32, activation="tanh",kernel_initializer=initializer)(inputs)
@@ -180,6 +180,9 @@ class Agent2:
         stddev_dir = tf.reshape(stddev_dir, shape=[-1])
 
         tfd = tfp.distributions
+        stddev_acc +=0.00000005
+        stddev_dir += 0.00000005
+
         acc_distribution = tfd.TruncatedNormal(loc=mean_acc , scale=stddev_acc, low=-1, high=+1, validate_args=True, allow_nan_stats=False,name='accelleration_norm')
         dir_distribution = tfd.TruncatedNormal(loc=mean_dir, scale=stddev_dir, low=-30, high=+30, validate_args=True, allow_nan_stats=False,name='direction_norm')
 
@@ -238,27 +241,39 @@ class Agent2:
             #print("{} and log_probs {}".format(a,new_probs))
             # compute loss
             prob_ratio = tf.math.exp(new_probs - old_probs )
-            min_advantage = tf.where(
-                advantages > 0,
-                (1 + .2) * advantages,
-                (1 - .2) * advantages,
+            clip_value = .2
+            clip_probs = tf.clip_by_value(prob_ratio, 1.-clip_value, 1.+clip_value)
+            actor_loss = -tf.reduce_mean(
+                tf.minimum(
+                    tf.multiply(prob_ratio, advantages),
+                    tf.multiply(clip_probs, advantages)
+                )
             )
-            partial = tf.math.multiply(prob_ratio, advantages)
-            partial = tf.math.minimum(partial, min_advantage)
-            partial = tf.reduce_mean(partial)
-            actor_loss = tf.math.negative(partial)
-            print("actor_loss = ",actor_loss)
+            #print("actor_loss = ",actor_loss)
+            # partial1 = tf.math.multiply(prob_ratio, advantages)
+            # clip_value= 0.2
+            # clip_probs = tf.clip_by_value(prob_ratio, 1.-clip_value, 1.+ clip_value)
+            # partial2 = tf.multiply(clip_probs,advantages)
+            #
+            # #min_advantage = tf.where(
+            # #    advantages > 0,
+            # #    (1 + .2) * advantages,
+            # #    (1 - .2) * advantages,
+            # #)
+            #
+            # loss = tf.math.minimum(partial1, partial2)
+            # actor_loss = -tf.reduce_mean(loss)
+            #print("actor_loss = ",actor_loss)
 
         grads = tape.gradient(actor_loss, actor_trainable_variables)
         self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
 
         _,updated_probs = self.act(states)
         kl = tf.reduce_mean(
-            old_probs
-            - updated_probs,
+             old_probs
+             - updated_probs,
         )
-        kl = tf.reduce_sum(kl)
-        return kl
+        return tf.reduce_sum(kl)
 
     @tf.function
     def train_critic_network(self,states, returns ,critic_trainable_variables):
@@ -266,39 +281,40 @@ class Agent2:
             tape.watch(critic_trainable_variables)
             new_vals = tf.convert_to_tensor(self.critic.model(states))
             value_loss = tf.reduce_mean((returns - new_vals) ** 2)
-            print("critc_loss = ", value_loss)
+            #print("critic_loss ",value_loss)
 
         grads = tape.gradient(value_loss, critic_trainable_variables)
         self.critic.optimizer.apply_gradients(zip(grads, critic_trainable_variables))
 
 
+
     def learn(self, training_iteration,target_kl):
         # get stored elements
         states, log_probs, advantages ,returns = self.memory.get()
-        # some preprocessing of saved data
-        # expected tensors like this: tf.Tensor([ [], [], ... )
-        states = tf.convert_to_tensor(states)  # float32
-        old_probs = tf.convert_to_tensor(log_probs ) #float32
+
+        states = tf.convert_to_tensor(states)# float32
+        old_probs = tf.convert_to_tensor(log_probs)# float32
+        advantages = tf.convert_to_tensor(advantages)
+        returns = tf.convert_to_tensor(returns)
 
         # train actor network
         print("Training actor")
         actor_trainable_variables = self.actor.model.trainable_variables
-
         for iter in range(training_iteration):
             kl = self.train_actor_network( states, old_probs, advantages, actor_trainable_variables )
             if kl > target_kl:
                 # Early Stopping
-                print("Early Stopping")
-                print("kl = {a} > {b} ".format(a=kl,b=target_kl) )
+                print("Early Stopping ! kl: {a} > target_kl : {b} ".format(a=kl,b=target_kl) )
                 break
 
 
         print("Training critic")
         critic_trainable_variables = self.critic.model.trainable_variables
-        print("returns mean value : ",tf.reduce_mean(returns))
         for iter in range(training_iteration):
             self.train_critic_network(states,returns,critic_trainable_variables)
 
+        print("Mean Returns : ", tf.reduce_mean(returns))
+        print("Mean Advantages : ", tf.reduce_mean(advantages))
 
 
     def summary(self,n_epoche):

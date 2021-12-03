@@ -87,21 +87,30 @@ def print_results(steps, rewards):
 
 def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target_kl):
 
+    metric_a = []
+    metric_b = []
+
     #params for advantage and return computation...
     gamma = 0.99
     lam = 0.97
 
     ##initialization
+    episode_return, episode_length = 0,0
+
     observation = env.reset()
     state = fromObservationToModelState(observation)
 
     for ep in range(n_epochs):
         print(ep+1, " EPOCH")
         gc.collect() #ogni cosa che non è puntanta viene cancellata
+        # Initialize the sum of the returns, lengths and number of episodes for each epoch
+        sum_return = 0
+        sum_length = 0
+        num_episodes = 0
 
         print("Collecting new episodes")
         for t in range(steps_per_epoch):
-            if (t+1)% 1000 == 0:
+            if (t+1)% 500 == 0:
                 print("collected {} episodes".format(t+1))
 
             #take a step into the environment
@@ -114,6 +123,9 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
             #get the value of the critic
             v_value = agent.critic.model(state)
             agent.remember(state, action, dists, reward, v_value, done)
+            episode_return += reward
+            episode_length += 1
+
             #set the new state as current
             state = fromObservationToModelState(observation)
             #set terminal condition
@@ -124,18 +136,27 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
                 agent.finish_trajectory(last_value,gamma,lam)
                 #we reset env only when the episodes is over or the memory is full
                 state = fromObservationToModelState(env.reset())
+                sum_return += episode_return
+                sum_length += episode_length
+                num_episodes += 1
+                episode_return, episode_length = 0, 0
 
         #gc.collect()
         agent.learn(training_iteration=train_iteration,target_kl=target_kl)
 
+        # Print mean return and length for each epoch
+        metric_a.append(sum_return / num_episodes)
+        metric_b.append(sum_length / num_episodes)
+        print( f" Epoch: {ep + 1}. Mean Return: {sum_return / num_episodes}. Mean Length: {sum_length / num_episodes}")
+
         if (ep+1) % 2 == 0:
             agent.save_models(pathB)
 
-
+    print("Training completed _\nMean Reward {}\nMean Length {}".format(metric_a,metric_b))
     return agent
 
 #global variables
-pathA = "saved_model"
+pathA = "saved_model_best"
 pathB = "saved_model"
 
 if __name__ == '__main__':
@@ -175,15 +196,18 @@ if __name__ == '__main__':
         doRace = 1
 
         #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
-        n_epochs = 6 #massimo 30 epoche è suggerito come range
-        steps_per_epoch = 2000  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
+        n_epochs = 50 #massimo 30 epoche è suggerito come range
+        steps_per_epoch = 2048  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
         train_iteration = 100
 
-        # lr_actor,lr_critic. ha senso tenerli diversi perchè a volte crasha una e non l'altra..
-        learning_rates = 0.0003, 0.0003
+        # lr_actor,lr_critic.
+        learning_rates = 0.0003, 0.001
         target_kl = 1.5 * 0.1
+        loadBeforeTraining = False
+
+
         agent = Agent2(
-            load_models=False,
+            load_models=loadBeforeTraining,
             path_saving_model = pathA,
             state_dimension = 5,
             num_action = 2 ,
@@ -209,6 +233,7 @@ if __name__ == '__main__':
         #----PRINTING RESULTS-----------
         print("\nTest Completed\n\nTraining Summary\n")
         print("epoch number : " + str(n_epochs) + " steps_per_epoch " + str(steps_per_epoch) + " train_iteration " + str(train_iteration))
+
         print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)
 
         print("\nSummary of the " + str(number_of_races) + " races : \n")
