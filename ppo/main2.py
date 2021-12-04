@@ -5,11 +5,13 @@ import gc
 
 import numpy as np
 import tensorflow as tf
-import tracks
-from ppo.Agent2 import Agent2
+#import tracks
+#from ppo.Agent2 import Agent2
 
-#from MicroRacer_Corinaldesi_Fiorilla import tracks
-#from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
+from MicroRacer_Corinaldesi_Fiorilla import tracks
+from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
+
+import matplotlib.pyplot as plt
 #tf.executing_eagerly()
 #tf.compat.v1.enable_eager_execution()
 
@@ -133,7 +135,7 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
             # if The trajectory reached to a terminal state or the expected number we stop moving and we calculate advantage
             if terminal or (t == steps_per_epoch - 1):
                 last_value = 0 if done else agent.critic.model(state)
-                agent.finish_trajectory(last_value,gamma,lam)
+                agent.finish_trajectory(last_value, done , gamma,lam)
                 #we reset env only when the episodes is over or the memory is full
                 state = fromObservationToModelState(env.reset())
                 sum_return += episode_return
@@ -150,39 +152,57 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
         print( f" Epoch: {ep + 1}. Mean Return: {sum_return / num_episodes}. Mean Length: {sum_length / num_episodes}")
 
         if (ep+1) % 2 == 0:
-            agent.save_models(pathB)
+           agent.save_models(pathB)
 
     print("Training completed _\nMean Reward {}\nMean Length {}".format(metric_a,metric_b))
+    plot_results(n_epochs, metric_a, metric_b)
+    agent.save_models(pathB)
     return agent
 
 #global variables
 pathA = "saved_model_best"
 pathB = "saved_model"
 
+def plot_results(n_epoch, line1, line2):
+
+    #create array for x axis
+    x = [*range(1, n_epoch+1)]
+
+    plt.plot(x, line1, label="Mean Return")
+    plt.plot(x, line2, label="Mean Length")
+
+    plt.xlabel('Epoch')
+    plt.ylabel(' ')
+    plt.title('Results')
+    plt.legend()    # show a legend on the plot
+    plt.show()
+
+
+
 if __name__ == '__main__':
 
     #with tf.device("/CPU:0"):
-        device_name = tf.test.gpu_device_name()
-        if device_name == '/device:GPU:0':
-            print("Using a GPU")
-        else:
-            print("Using a CPU")
-
-
-        gpus = tf.config.list_physical_devices('GPU')
-        if gpus:
-            try:
-                # Currently, memory growth needs to be the same across GPUs
-                for gpu in gpus:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                logical_gpus = tf.config.list_logical_devices('GPU')
-                print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-            except RuntimeError as e:
-                # Memory growth must be set before GPUs have been initialized
-                print(e)
-
-        print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-        print("tf.version = ", tf.version.VERSION)
+        # device_name = tf.test.gpu_device_name()
+        # if device_name == '/device:GPU:0':
+        #     print("Using a GPU")
+        # else:
+        #     print("Using a CPU")
+        #
+        #
+        # gpus = tf.config.list_physical_devices('GPU')
+        # if gpus:
+        #     try:
+        #         # Currently, memory growth needs to be the same across GPUs
+        #         for gpu in gpus:
+        #             tf.config.experimental.set_memory_growth(gpu, True)
+        #         logical_gpus = tf.config.list_logical_devices('GPU')
+        #         print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        #     except RuntimeError as e:
+        #         # Memory growth must be set before GPUs have been initialized
+        #         print(e)
+        #
+        # print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+        # print("tf.version = ", tf.version.VERSION)
 
         # accumulator params for tests
         elapsed_time = 0
@@ -196,8 +216,8 @@ if __name__ == '__main__':
         doRace = 1
 
         #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
-        n_epochs = 50 #massimo 30 epoche è suggerito come range
-        steps_per_epoch = 2048  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
+        n_epochs = 20 #massimo 30 epoche è suggerito come range
+        steps_per_epoch = 2500  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
         train_iteration = 100
 
         # lr_actor,lr_critic.
@@ -218,6 +238,15 @@ if __name__ == '__main__':
         #race params
         number_of_races = 50
         # https://rishy.github.io/ml/2017/01/05/how-to-train-your-dnn/
+
+        print("####### RACE BEFORE TRAIN #########")
+        steps_b, rewards_b = new_race(env, agent, races=number_of_races)
+
+        # ----PRINTING RESULTS-----------
+
+        print("\nSummary of the " + str(number_of_races) + " races : \n")
+        print_results(steps_b, rewards_b)
+
         if doTrain:
              try:
                 t = time.process_time()
@@ -236,9 +265,6 @@ if __name__ == '__main__':
 
         print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)
 
+        print("####### RACE AFTER TRAIN #########")
         print("\nSummary of the " + str(number_of_races) + " races : \n")
-        print("Total Reward => ", rewards)
-        print("Steps done for race => ", steps)
-        print("Mean Reward : ", np.mean(rewards))
-        print("Mean Step Number : ", np.mean(steps))
-
+        print_results(steps, rewards)

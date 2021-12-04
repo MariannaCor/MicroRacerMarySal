@@ -2,7 +2,7 @@
 import math
 import sys
 import numpy as np
-import matplotlib.pyplot as plt
+
 
 import scipy.signal
 import tensorflow as tf
@@ -215,7 +215,7 @@ class Agent2:
     def remember(self, state, action, prob, reward, value, done):
         self.memory.store_memory(state, action, prob, reward, value, done)
 
-    def finish_trajectory(self, last_value=0 ,gamma=0.99, lam=0.95):
+    def finish_trajectory(self, last_value=0, last_done=True, gamma=0.99, lam=0.95):
 
         #we declare this inner function to reuse it two times.
         def discounted_cumulative_sums(x, discount):
@@ -226,9 +226,13 @@ class Agent2:
         path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer)
         rewards = np.append(self.memory.rewards[path_slice], last_value)
         values = np.append(self.memory.values[path_slice], last_value)
-        deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
+        dones = np.append(self.memory.dones[path_slice], last_done)
+        #rewards + GAMMA * vpred[1:] * (1 - terminals_array[1:]) - vpred[:-1]
+        #deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
+        deltas = rewards[:-1] + gamma * values[1:] * (1 - dones[1:]) - values[:-1]
         self.memory.advantages[path_slice] = discounted_cumulative_sums(deltas, gamma * lam)
-        self.memory.returns[path_slice] = discounted_cumulative_sums(rewards, gamma )[:-1]
+        #self.memory.returns[path_slice] = discounted_cumulative_sums(rewards, gamma )[:-1]
+        self.memory.returns[path_slice] =  self.memory.advantages[path_slice] + self.memory.values[path_slice]
         self.memory.trajectory_start_index = self.memory.pointer
 
 
@@ -303,9 +307,9 @@ class Agent2:
         for iter in range(training_iteration):
             kl = self.train_actor_network( states, old_probs, advantages, actor_trainable_variables )
             if kl > target_kl:
-                # Early Stopping
-                print("Early Stopping ! kl: {a} > target_kl : {b} ".format(a=kl,b=target_kl) )
-                break
+               # Early Stopping
+               print("Early Stopping ! kl: {a} > target_kl : {b} ".format(a=kl,b=target_kl) )
+               break
 
 
         print("Training critic")
