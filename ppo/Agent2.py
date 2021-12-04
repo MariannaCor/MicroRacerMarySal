@@ -7,6 +7,7 @@ import numpy as np
 import scipy.signal
 import tensorflow as tf
 import tensorflow_probability as tfp
+from matplotlib import pyplot as plt
 
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -82,25 +83,25 @@ class ActorNet():
         train_dir = True
 
        # initializer = tf.keras.initializers.GlorotUniform(seed=None)
-        relu_initializer =  tf.keras.initializers.LecunNormal()
+        initializer =  tf.keras.initializers.RandomUniform(minval=0., maxval=.0005)
 
         inputs = keras.Input(shape=[input_dims,], dtype=tf.float32)
 
         # tower of acceleration
-        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=relu_initializer )(inputs)
-        out1 = layers.Dense(32, activation="relu", trainable=train_acc, kernel_initializer=relu_initializer )(out1)
+        out1 = layers.Dense(32, activation="tanh", trainable=train_acc, kernel_initializer=initializer )(inputs)
+        out1 = layers.Dense(32, activation="tanh", trainable=train_acc, kernel_initializer=initializer )(out1)
 
         # mu,var of accelleration
-        mu_acc_out = layers.Dense(1, activation='tanh', trainable=train_acc, kernel_initializer=tf.keras.initializers.zeros() )(out1)
-        var_acc_out = layers.Dense(1, activation='relu', trainable=train_acc,kernel_initializer=relu_initializer )(out1)
+        mu_acc_out = layers.Dense(1, activation='sigmoid', trainable=train_acc, kernel_initializer=initializer )(out1)
+        var_acc_out = layers.Dense(1, activation='softplus', trainable=train_acc,kernel_initializer=initializer )(out1)
 
         # tower of direction
-        out2 = layers.Dense(32, activation="relu", trainable=train_dir, kernel_initializer=relu_initializer)(inputs)
-        out2 = layers.Dense(32, activation="relu", trainable=train_dir , kernel_initializer=relu_initializer)(out2)
+        out2 = layers.Dense(32, activation="tanh", trainable=train_dir, kernel_initializer=initializer)(inputs)
+        out2 = layers.Dense(32, activation="tanh", trainable=train_dir , kernel_initializer=initializer)(out2)
 
         # mu,var of direction
-        mu_dir_out = layers.Dense(1, activation='tanh', trainable=train_dir, kernel_initializer=tf.keras.initializers.zeros() )(out2)
-        var_dir_out = layers.Dense(1, activation='relu', trainable=train_dir, kernel_initializer=relu_initializer )(out2)
+        mu_dir_out = layers.Dense(1, activation='sigmoid', trainable=train_dir, kernel_initializer=initializer )(out2)
+        var_dir_out = layers.Dense(1, activation='softplus', trainable=train_dir, kernel_initializer=initializer )(out2)
         #tanh torna sempre un valore di range fra -1 e +1 ed è inizializzata a 0 come primo valore medio.
         #softplus(x) = log(exp(x) + 1) quindi torna un valore compreso nel range [0,inf] e ci fa comodo perchè stima
         #la dev standard. Esso viene inizializzato ad 1.
@@ -215,25 +216,40 @@ class Agent2:
     def remember(self, state, action, prob, reward, value, done):
         self.memory.store_memory(state, action, prob, reward, value, done)
 
-    def finish_trajectory(self, last_value=0, last_done=True, gamma=0.99, lam=0.95):
-
-        #we declare this inner function to reuse it two times.
-        def discounted_cumulative_sums(x, discount):
-            # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
-            return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
-
-        # Finish the trajectory by computing advantage estimates and rewards-to-go to
+    def finish_trajectory(self, last_value=0, gamma=0.99, lam=0.95):
         path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer)
-        rewards = np.append(self.memory.rewards[path_slice], last_value)
+        rewards = self.memory.rewards[path_slice]
         values = np.append(self.memory.values[path_slice], last_value)
-        dones = np.append(self.memory.dones[path_slice], last_done)
-        #rewards + GAMMA * vpred[1:] * (1 - terminals_array[1:]) - vpred[:-1]
-        #deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
-        deltas = rewards[:-1] + gamma * values[1:] * (1 - dones[1:]) - values[:-1]
-        self.memory.advantages[path_slice] = discounted_cumulative_sums(deltas, gamma * lam)
-        #self.memory.returns[path_slice] = discounted_cumulative_sums(rewards, gamma )[:-1]
-        self.memory.returns[path_slice] =  self.memory.advantages[path_slice] + self.memory.values[path_slice]
+        dones =  self.memory.dones[path_slice]
+        returns = []
+        gae = 0.
+        for i in reversed(range(len(rewards))):
+            delta = rewards[i] + gamma * values[i+1] * (1 - int(dones[i])) - values[i]
+            gae = delta + (gamma*lam) * (1-int(dones[i])) * gae
+            returns.insert(0, gae + values[i])
+        adv = np.array(returns) - values[:-1]
+        adv = (adv - np.mean(adv) ) / (np.std(adv) + 1e-10 )
+
+        self.memory.advantages[path_slice] = adv
+
+        self.memory.returns[path_slice] = returns
         self.memory.trajectory_start_index = self.memory.pointer
+
+        # discount = 1
+        # a_t = 0
+        # for i in range(len(rewards)):
+        #     delta = rewards[i] + gamma * values[i] * (1 - dones[i]) - values[i+1]
+        #     a_t += discount * delta
+        #     discount *= gamma * lam
+        # advantages[i] = a_t
+
+        #deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
+        #deltas = rewards[:-1] + gamma * values[1:] * (1 - dones[1:]) - values[:-1]
+        #self.memory.advantages[path_slice] = discounted_cumulative_sums(deltas, gamma * lam)
+        #self.memory.returns[path_slice] = discounted_cumulative_sums(rewards, gamma )[:-1]
+        #self.memory.returns[path_slice] =  self.memory.advantages[path_slice] + self.memory.values[path_slice]
+
+
 
 
     @tf.function
@@ -284,6 +300,7 @@ class Agent2:
         with tf.GradientTape() as tape:
             tape.watch(critic_trainable_variables)
             new_vals = tf.convert_to_tensor(self.critic.model(states))
+            #squared error loss
             value_loss = tf.reduce_mean((returns - new_vals) ** 2)
             #print("critic_loss ",value_loss)
 
