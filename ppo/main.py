@@ -1,12 +1,97 @@
+import gc
+import sys
+
 import numpy as np
 import tensorflow as tf
+
 import tracks
 from ppo.Agent import Agent
 
-tf.compat.v1.enable_eager_execution()
 
-#from MicroRacer_Corinaldesi_Fiorilla import tracks
-#from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent import Agent
+def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target_kl):
+
+    metric_a = []
+    metric_b = []
+
+    #params for advantage and return computation...
+    gamma = 0.99
+    lam = 0.95 #0.95 in hands on,0.995
+
+    ##initialization
+    episode_return, episode_length = 0,0
+
+    observation = env.reset()
+    state = fromObservationToModelState(observation)
+
+    for ep in range(n_epochs):
+        print(ep+1, " EPOCH")
+        gc.collect() #ogni cosa che non è puntanta viene cancellata
+        # Initialize the sum of the returns, lengths and number of episodes for each epoch
+        sum_return = 0
+        sum_length = 0
+        num_episodes = 0
+
+        print("Collecting new episodes")
+
+        for t in range(steps_per_epoch):
+            if (t+1)% 1000 == 0:
+                print("collected {} episodes".format(t+1))
+
+            #take a step into the environment
+            action, dists = agent.act(state)
+
+            if np.isnan(action).any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
+                sys.exit("np.isnan (action) = true")
+
+            observation, reward, done = env.step(action)
+            #get the value of the critic
+            v_value = agent.critic.model(state)
+            agent.remember(state, action, dists, reward, v_value, done)
+
+            episode_return += reward
+            episode_length += 1
+
+            #set the new state as current
+            state = fromObservationToModelState(observation)
+            #set terminal condition
+
+            # if The trajectory reached to a terminal state or the expected number we stop moving and we calculate advantage
+            if done or (t == steps_per_epoch - 1):
+                last_value = 0 if done else agent.critic.model(state)
+
+                path_slice = agent.finish_trajectory(last_value, gamma, lam)
+                agent.print_trajectory(epoch_label=(ep + 1), path_slice=path_slice, label = "trajectory1")
+
+                path_slice = agent.finish_trajectory2(last_value, gamma, lam )
+                agent.print_trajectory(epoch_label=(ep+1), path_slice=path_slice, label ="trajectory2")
+
+
+
+                #we reset env only when the episodes is over or the memory is full
+                state = fromObservationToModelState(env.reset())
+                sum_return += episode_return
+                sum_length += episode_length
+                num_episodes += 1
+                episode_return, episode_length = 0, 0
+
+        #gc.collect()
+        agent.learn(training_iteration=train_iteration,target_kl=target_kl)
+
+        # Print mean return and length for each epoch
+        metric_a.append(sum_return / num_episodes)
+        metric_b.append(sum_length / num_episodes)
+        print( f" Epoch: {ep + 1}. Mean Return: {sum_return / num_episodes}. Mean Length: {sum_length / num_episodes}")
+
+        if (ep+1) % 2 == 0:
+           agent.save_models(pathB)
+
+    print("Training completed _\nMean Reward {}\nMean Length {}".format(metric_a,metric_b))
+    plot_results(n_epochs, metric_a, "Mean Return")
+    plot_results(n_epochs, metric_b, "Mean Length")
+    agent.save_models(pathB)
+    return agent
+
+
 
 
 def max_lidar(observation, angle=np.pi / 3, pins=19):
@@ -37,57 +122,27 @@ def fromObservationToModelState(observation):
     state = tf.expand_dims(state, 0)
     return state
 
-
 if __name__ == '__main__':
 
-    print("tf.version = ", tf.version.VERSION)
+    loadBeforeTraining = False
+    pathA = "saved_model"
+    learning_rates = 0.03,0.01
+
+    n_epochs = 5
+    steps_per_epoch = 10
+    train_iteration = 100
+    target_kl = 1.5 * 0.1
+
 
     env = tracks.Racer()
+    agent = Agent(
+        load_models=loadBeforeTraining,
+        path_saving_model=pathA,
+        state_dimension=5,
+        num_action=2,
+        alpha=learning_rates,
+        size_memory=steps_per_epoch
+    )
 
-    state_dim = 5  # we reduce the state dim through observation (see below)
-    num_actions = 2  # acceleration and steering
-    chunk_memory_size = 50
-
-    agent = Agent(state_dimension=state_dim, chunk_memory_size=10, num_actions = num_actions)
-    done = False
-
-    # observation = env.reset() #prima osservazione
-    # state = fromObservationToModelState(observation)
-    # print("state in input of the net is ", state)
-    # action = agent.choose_action(state)
-    #
-    # print("returned action is ", action)
-    #
-    # observation_, reward, done = env.step(action) # prima mossa
-    #
-    # print("obs_ ", observation_)
-    # print("reward ", reward)
-    # print("done ", done)
-    #
-    # agent.remember(observation, action, reward, done)
-
-    n_races = 1
-    N = 20;
-    n_steps = 0  # conto gli step per fermarmi ogni N
-
-    for race in range(n_races):
-        observation = env.reset()
-        done = False
-        score = 0
-
-        state = fromObservationToModelState(observation)
-
-        agent.training2(state,env)
-        #
-        # while not done:
-        #     state = fromObservationToModelState(observation)
-        #     action, prob, v_value = agent.choose_action(state)
-        #     observation_, reward, done = env.step(action)
-        #     n_steps += 1
-        #     score += reward
-        #     agent.remember(state, action, prob, reward,v_value, done)
-        #
-        #     if n_steps % N == 0:
-        #         agent.training(n_epochs= 50)
-        #
-        #     observation = observation_
+    agent = training_agent(env, agent, n_epochs=n_epochs, steps_per_epoch=steps_per_epoch,
+                           train_iteration=train_iteration, target_kl=target_kl)

@@ -1,6 +1,5 @@
 import sys
 import time
-import os
 import gc
 
 import numpy as np
@@ -14,6 +13,7 @@ from ppo.Agent2 import Agent2
 import matplotlib.pyplot as plt
 #tf.executing_eagerly()
 #tf.compat.v1.enable_eager_execution()
+
 
 def max_lidar(observation, angle=np.pi / 3, pins=19):
     arg = np.argmax(observation)
@@ -94,7 +94,7 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
 
     #params for advantage and return computation...
     gamma = 0.99
-    lam = 0.97
+    lam = 0.95 #0.95 in hands on,0.995
 
     ##initialization
     episode_return, episode_length = 0,0
@@ -111,15 +111,16 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
         num_episodes = 0
 
         print("Collecting new episodes")
+
         for t in range(steps_per_epoch):
-            if (t+1)% 500 == 0:
+            if (t+1)% 1000 == 0:
                 print("collected {} episodes".format(t+1))
 
             #take a step into the environment
             action, dists = agent.act(state)
 
             if np.isnan(action).any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
-                sys.exit("np.isnan (action) ")
+                sys.exit("np.isnan (action) = true")
 
             observation, reward, done = env.step(action)
             #get the value of the critic
@@ -135,10 +136,8 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
 
             # if The trajectory reached to a terminal state or the expected number we stop moving and we calculate advantage
             if done or (t == steps_per_epoch - 1):
-
                 last_value = 0 if done else agent.critic.model(state)
-                agent.finish_trajectory(last_value, gamma, lam)
-
+                agent.finish_trajectory2(last_value, gamma, lam)
                 #we reset env only when the episodes is over or the memory is full
                 state = fromObservationToModelState(env.reset())
                 sum_return += episode_return
@@ -158,29 +157,24 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
            agent.save_models(pathB)
 
     print("Training completed _\nMean Reward {}\nMean Length {}".format(metric_a,metric_b))
-    plot_results(n_epochs, metric_a, metric_b)
+    plot_results(n_epochs, metric_a, "Mean Return")
+    plot_results(n_epochs, metric_b, "Mean Length")
     agent.save_models(pathB)
     return agent
 
-#global variables
-pathA = "saved_model_best"
-pathB = "saved_model"
 
-def plot_results(n_epoch, line1, line2):
-
+def plot_results(n_epoch, line1, label):
     #create array for x axis
     x = [*range(1, n_epoch+1)]
-
-    plt.plot(x, line1, label="Mean Return")
-    plt.plot(x, line2, label="Mean Length")
-
+    plt.plot(x, line1, label=label)
     plt.xlabel('Epoch')
     plt.ylabel(' ')
     plt.title('Results')
-    plt.legend()    # show a legend on the plot
     plt.show()
 
-
+#global variables
+pathA = "saved_model"
+pathB = "saved_model"
 
 if __name__ == '__main__':
 
@@ -196,14 +190,14 @@ if __name__ == '__main__':
         doRace = 1
 
         #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
-        n_epochs = 50  #massimo 30 epoche è suggerito come range
-        steps_per_epoch = 3500  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
+        #training params in hands on 2049 steps size, PPO_EPOCHES = 10
+        n_epochs = 30 #massimo 30 epoche è suggerito come range
+        steps_per_epoch = 1024  #meglio se usiamo multipli di 2 ed 8 così il processore si trova meglio. Nei papers sono suggeriti  4 to 4096
         train_iteration = 100
 
         # lr_actor,lr_critic.
-        learning_rates = 0.0003, 0.001
-        loadBeforeTraining = False
-
+        learning_rates = 0.3, 0.1
+        loadBeforeTraining = True
         target_kl = 1.5 * 0.1
 
         agent = Agent2(
