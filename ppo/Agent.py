@@ -175,37 +175,14 @@ class Agent:
     def remember(self, state, action, prob, reward, value, done):
         self.memory.store_memory(state, action, prob, reward, value, done)
 
-    def finish_trajectory2(self, last_value=0, gamma=0.99, lam=0.95):
-        #testata che è giusta
-        path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer)  # la traiettoria
-        rewards = self.memory.rewards[path_slice]
-        values = np.append(self.memory.values[path_slice], last_value)
-        dones = self.memory.dones[path_slice]
 
-        adv = np.zeros(len(rewards), dtype=np.float32)
 
-        for t in range(len(rewards)):
-            discount = 1
-            a_t = 0
-            for k in range(t, len(rewards)):
-                a_t += discount * (rewards[k] + gamma * values[k + 1] * (1 - int(dones[k])) - values[k])
-                discount *= gamma * lam
-            adv[t] = a_t
-
-        returns = adv + values[:-1]
-        adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-10)
-        self.memory.advantages[path_slice] = adv
-        self.memory.returns[path_slice] = returns
-        self.memory.trajectory_start_index = self.memory.pointer
-        return path_slice
 
     def finish_trajectory(self, last_value=0, gamma=0.99, lam=0.95):
-        #testata che è giusta
         path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer) #la traiettoria
         rewards = self.memory.rewards[path_slice]
         values = np.append(self.memory.values[path_slice], last_value)
         dones = self.memory.dones[path_slice]
-
         returns = []
         gae = 0.
         for i in reversed(range(len(rewards))):
@@ -217,24 +194,16 @@ class Agent:
         adv = np.array(returns) - values[:-1]
 
         #normalize advantage
-        #adv = tf.keras.utils.normalize(adv)
         adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-10)
+
+        # normalize expected returns
+        returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-10 )
 
         self.memory.advantages[path_slice] = adv
         self.memory.returns[path_slice] = returns
-        #self.memory.trajectory_start_index = self.memory.pointer
-        return path_slice
+        self.memory.trajectory_start_index = self.memory.pointer
 
-        # discount = 1
-        # gae = 0
-        # for i in range(len(rewards)):
-        #     delta = rewards[i] + gamma * values[i] * (1 - dones[i]) - values[i+1]
-        #     gae += discount * delta
-        #     discount *= gamma * lam
-        # advantages[i] = a_t
-
-
-    #@tf.function
+    @tf.function
     def train_actor_network(self, states, old_probs, advantages, actor_trainable_variables):
         with tf.GradientTape() as tape:  # everithing here is recorded and released then.
             tape.watch(actor_trainable_variables)
@@ -242,19 +211,25 @@ class Agent:
             ratio = tf.exp( new_probs - old_probs )
             surr1 = ratio * advantages
             clip_ratio =.2
-            surr2 = tf.clip_by_value(ratio, 1-clip_ratio, 1+clip_ratio) * advantages
+            surr2 = tf.clip_by_value(t=ratio, clip_value_min=1-clip_ratio, clip_value_max=1+clip_ratio) * advantages
             actor_loss = - tf.reduce_mean( tf.minimum(surr1,surr2) )
-            #print("actor loss ",actor_loss)
+
         grads = tape.gradient(actor_loss, actor_trainable_variables)
         self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
 
-    #@tf.function
+        _, updated_probs = self.act(states)
+        kl = tf.reduce_mean(
+            old_probs
+            - updated_probs,
+        )
+        return tf.reduce_sum(kl)
+
+    @tf.function
     def train_critic_network(self, states, returns, critic_trainable_variables):
         with tf.GradientTape() as tape:
             tape.watch(critic_trainable_variables)
             new_vals = tf.convert_to_tensor(self.critic.model(states))
             value_loss = tf.reduce_mean( tf.pow(returns - new_vals, 2) )
-            #print("value_loss = ", value_loss)
 
         grads = tape.gradient(value_loss, critic_trainable_variables)
         self.critic.optimizer.apply_gradients(zip(grads, critic_trainable_variables))
@@ -272,11 +247,10 @@ class Agent:
         print("Training actor")
         actor_trainable_variables = self.actor.model.trainable_variables
         for iter in range(training_iteration):
-            self.train_actor_network(states, old_probs, advantages, actor_trainable_variables)
-            #if kl > target_kl:
-                # Early Stopping
-            #    print("Early Stopping ! kl: {a} > target_kl : {b} ".format(a=kl, b=target_kl))
-            #    break
+            kl = self.train_actor_network(states, old_probs, advantages, actor_trainable_variables)
+            if kl > target_kl:
+                print("Early Stopping ! kl: {a} > target_kl : {b} ".format(a=kl, b=target_kl))
+                break
 
         print("Training critic")
         critic_trainable_variables = self.critic.model.trainable_variables
@@ -298,25 +272,3 @@ class Agent:
         plt.legend()
         # function to show the plot
         plt.show()
-
-    def print_trajectory(self, epoch_label,path_slice, label):
-
-        actions = self.memory.actions[path_slice]
-
-        rewards = self.memory.rewards[path_slice]
-        values = self.memory.values[path_slice]
-        adv = self.memory.advantages[path_slice]
-        returns = self.memory.returns[path_slice]
-        dones = self.memory.dones[path_slice]
-
-
-        print("{}\nepoch {} done= {}".format(label,(epoch_label), bool(dones[-1])))
-        print("***************")
-        print("action ",actions)
-        print("rewards {}".format(rewards))
-        print("values {}".format(values))
-        print("dones {}".format(dones))
-        print("**************")
-        print("adv {}".format(adv))
-        print("returns {}".format(returns))
-        print("**************")

@@ -75,11 +75,9 @@ class ActorNet():
         # mu,var of direction
         mu_dir_out = layers.Dense(1, activation='sigmoid', trainable=train_dir, kernel_initializer=initializer)(out2)
         var_dir_out = layers.Dense(1, activation='softplus', trainable=train_dir, kernel_initializer=initializer)(out2)
-        # tanh torna sempre un valore di range fra -1 e +1 ed è inizializzata a 0 come primo valore medio.
-        # softplus(x) = log(exp(x) + 1) quindi torna un valore compreso nel range [0,inf] e ci fa comodo perchè stima
-        # la dev standard. Esso viene inizializzato ad 1.
 
         outputs = layers.concatenate([mu_acc_out, var_acc_out, mu_dir_out, var_dir_out])
+
         self.model = keras.Model(inputs, outputs, name="ActorNet")
         self.optimizer = keras.optimizers.Adam(learning_rate=lr)
 
@@ -108,7 +106,7 @@ class CriticNet():
         self.model.save(path)
 
 
-class Agent2:
+class Agent:
 
     def __init__(self, state_dimension, num_action, alpha, size_memory, path_saving_model, load_models=False, ):
 
@@ -176,6 +174,7 @@ class Agent2:
         self.memory.store_memory(state, action, prob, reward, value, done)
 
     def finish_trajectory2(self, last_value=0, gamma=0.99, lam=0.95):
+        #testata che è giusta
         path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer)  # la traiettoria
         rewards = self.memory.rewards[path_slice]
         values = np.append(self.memory.values[path_slice], last_value)
@@ -191,16 +190,15 @@ class Agent2:
                 discount *= gamma * lam
             adv[t] = a_t
 
-        #adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-10)
-        #ret = (ret - np.mean(ret)) / (np.std(ret) + 1e-10)
+        returns = adv + values[:-1]
+        adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-10)
         self.memory.advantages[path_slice] = adv
-        self.memory.returns[path_slice] = adv + values[:-1]
+        self.memory.returns[path_slice] = returns
         self.memory.trajectory_start_index = self.memory.pointer
-
+        return path_slice
 
     def finish_trajectory(self, last_value=0, gamma=0.99, lam=0.95):
-
-        path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer) #la traiettoria
+        path_slice = slice(self.memory.trajectory_start_index, self.memory.pointer)
         rewards = self.memory.rewards[path_slice]
         values = np.append(self.memory.values[path_slice], last_value)
         dones = self.memory.dones[path_slice]
@@ -219,24 +217,14 @@ class Agent2:
         #adv = tf.keras.utils.normalize(adv)
         adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-10)
 
-        # normalize expected returns
-        returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-10 )
-
         self.memory.advantages[path_slice] = adv
         self.memory.returns[path_slice] = returns
         self.memory.trajectory_start_index = self.memory.pointer
+        return path_slice
 
 
-        # discount = 1
-        # gae = 0
-        # for i in range(len(rewards)):
-        #     delta = rewards[i] + gamma * values[i] * (1 - dones[i]) - values[i+1]
-        #     gae += discount * delta
-        #     discount *= gamma * lam
-        # advantages[i] = a_t
 
-
-    #@tf.function
+    @tf.function
     def train_actor_network(self, states, old_probs, advantages, actor_trainable_variables):
         with tf.GradientTape() as tape:  # everithing here is recorded and released then.
             tape.watch(actor_trainable_variables)
@@ -246,18 +234,16 @@ class Agent2:
             clip_ratio =.2
             surr2 = tf.clip_by_value(ratio, 1-clip_ratio, 1+clip_ratio) * advantages
             actor_loss = - tf.reduce_mean( tf.minimum(surr1,surr2) )
-            print("actor loss ",actor_loss)
+
         grads = tape.gradient(actor_loss, actor_trainable_variables)
         self.actor.optimizer.apply_gradients(zip(grads, actor_trainable_variables))
 
-    #@tf.function
+    @tf.function
     def train_critic_network(self, states, returns, critic_trainable_variables):
         with tf.GradientTape() as tape:
             tape.watch(critic_trainable_variables)
             new_vals = tf.convert_to_tensor(self.critic.model(states))
             value_loss = tf.reduce_mean( tf.pow(returns - new_vals, 2) )
-           # value_loss = tf.reduce_mean ( keras.losses.mean_squared_error( returns, new_vals) )
-            print("value_loss = ", value_loss)
 
         grads = tape.gradient(value_loss, critic_trainable_variables)
         self.critic.optimizer.apply_gradients(zip(grads, critic_trainable_variables))
@@ -301,3 +287,25 @@ class Agent2:
         plt.legend()
         # function to show the plot
         plt.show()
+
+    def print_trajectory(self, epoch_label,path_slice, label):
+
+        actions = self.memory.actions[path_slice]
+
+        rewards = self.memory.rewards[path_slice]
+        values = self.memory.values[path_slice]
+        adv = self.memory.advantages[path_slice]
+        returns = self.memory.returns[path_slice]
+        dones = self.memory.dones[path_slice]
+
+
+        print("{}\nepoch {} done= {}".format(label,(epoch_label), bool(dones[-1])))
+        print("***************")
+        print("action ",actions)
+        print("rewards {}".format(rewards))
+        print("values {}".format(values))
+        print("dones {}".format(dones))
+        print("**************")
+        print("adv {}".format(adv))
+        print("returns {}".format(returns))
+        print("**************")
