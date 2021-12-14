@@ -39,6 +39,7 @@ def fromObservationToModelState(observation):
     state = observe(observation)
     state = tf.expand_dims(state, 0)
     return state
+
 def new_race(env, agent, races=15):
 
     #print("NEW RACES ")
@@ -62,6 +63,7 @@ def new_race(env, agent, races=15):
         total_steps.append(steps_race_counter)
 
     return total_steps,total_rewards
+
 def print_results(steps, rewards):
     # risultati delle corse dopo il training per ogni epoca
     print("Total Reward => ", rewards)
@@ -79,14 +81,16 @@ def plot_results(n_epoch, line1, label):
     plt.title('Results')
     plt.show()
 
+
 def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target_kl):
 
     metric_a = []
     metric_b = []
+    best_reward = float('-inf')
 
     #params for advantage and return computation...
     gamma = 0.99
-    lam = 0.95 #0.95 in hands on,0.995
+    lam = 0.95
 
     ##initialization
     episode_return, episode_length = 0,0
@@ -140,22 +144,29 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
         agent.learn(training_iteration=train_iteration,target_kl=target_kl)
 
         # Print mean return and length for each epoch
-        metric_a.append(sum_return / num_episodes)
+        mean_episode_reward = sum_return / num_episodes
+        metric_a.append(mean_episode_reward)
         metric_b.append(sum_length / num_episodes)
-        print( f" Epoch: {ep + 1}. Mean Return: {sum_return / num_episodes}. Mean Length: {sum_length / num_episodes}")
+        print( f" Epoch: {ep + 1}. Mean Return: {mean_episode_reward}. Mean Length: {sum_length / num_episodes}")
 
-        if (ep+1) % 2 == 0:
-           agent.save_models(pathB)
+        if(ep+1) % 20 == 0:
+            agent.save_models(PATH_A)
 
+        if (mean_episode_reward * 1000) >= (best_reward*1000) :
+            print(" New Best Epoch rewards got ! ",mean_episode_reward)
+            best_reward = mean_episode_reward
+            agent.save_models(PATH_B)
+
+    agent.save_models(PATH_A)
     print("Training completed _\nMean Reward {}\nMean Length {}".format(metric_a,metric_b))
     plot_results(n_epochs, metric_a, "Mean Return")
     plot_results(n_epochs, metric_b, "Mean Length")
-    agent.save_models(pathB)
+
     return agent
 
 #global variables
-pathA = "saved_model"
-pathB = "saved_model"
+PATH_A = "saved_model"
+PATH_B = "saved_best_model"
 
 
 if __name__ == '__main__':
@@ -173,34 +184,26 @@ if __name__ == '__main__':
 
         #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
         #training params in hands on 2049 steps size, PPO_EPOCHES = 10
-        n_epochs = 30
-        steps_per_epoch = 2048  # es: 1024, 2048, 3072, 4096
-        train_iteration = 100
+        n_epochs = 50
+        steps_per_epoch = 512 # es: 1024, 2048, 3072, 4096
+        train_iteration = 80
 
         # lr_actor,lr_critic.
-        learning_rates = 0.003, 0.001
-        loadBeforeTraining = False
+        learning_rates = 0.03, 0.03
+        loadBeforeTraining = True
         target_kl = 1.5 * 0.1
 
         agent = Agent(
             load_models=loadBeforeTraining,
-            path_saving_model = pathA,
+            path_saving_model = PATH_A,
             state_dimension = 5,
-            num_action = 2 ,
+            num_action= 2 ,
             alpha = learning_rates,
             size_memory = steps_per_epoch
         )
 
         #race params
         number_of_races = 50
-        # https://rishy.github.io/ml/2017/01/05/how-to-train-your-dnn/
-        #
-        # print("####### RACE BEFORE TRAIN #########")
-        # steps_b, rewards_b = new_race(env, agent, races=number_of_races)
-        # # ----PRINTING RESULTS-----------
-        #
-        # print("\nSummary of the " + str(number_of_races) + " races : \n")
-        # print_results(steps_b, rewards_b)
 
         if doTrain:
              try:
@@ -211,7 +214,7 @@ if __name__ == '__main__':
                 print(e)
 
         if doRace:
-            agent.load_models(pathB)
+            agent.load_models(PATH_B)
             steps,rewards = new_race(env,agent,races=number_of_races)
 
         #----PRINTING RESULTS-----------
