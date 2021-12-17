@@ -5,6 +5,7 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+from matplotlib import animation
 
 from utils import tracks
 from ppo.Agent import Agent
@@ -35,6 +36,7 @@ def observe(racer_state):
         lidar_signal, v = racer_state
         dir, (distl, dist, distr) = max_lidar(lidar_signal)
         return np.array([dir, distl, dist, distr, v])
+
 def fromObservationToModelState(observation):
     state = observe(observation)
     state = tf.expand_dims(state, 0)
@@ -73,12 +75,12 @@ def print_results(steps, rewards):
     print("###################################")
 
 def plot_results(n_epoch, line1, label):
-    #create array for x axis
     x = [*range(1, n_epoch+1)]
-    plt.plot(x, line1, label=label)
+    plt.bar(x, line1,label=label)
     plt.xlabel('Epoch')
     plt.ylabel(' ')
     plt.title('Results')
+
     plt.show()
 
 
@@ -90,7 +92,7 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
 
     #params for advantage and return computation...
     gamma = 0.99
-    lam = 0.95
+    lam = 0.97
 
     ##initialization
     episode_return, episode_length = 0,0
@@ -110,14 +112,10 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
 
         for t in range(steps_per_epoch):
             if (t+1)% 1000 == 0:
-                print("collected {} episodes".format(t+1))
+                print("collected {} steps ".format(t+1))
 
             #take a step into the environment
             action, dists = agent.act(state)
-
-            if np.isnan(action).any() : #ad un certo punto la rete torna valori nan ?a cosa è dovuto ?
-                sys.exit("np.isnan (action) = true")
-
             observation, reward, done = env.step(action)
             #get the value of the critic
             v_value = agent.critic.model(state)
@@ -147,15 +145,15 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
         mean_episode_reward = sum_return / num_episodes
         metric_a.append(mean_episode_reward)
         metric_b.append(sum_length / num_episodes)
-        print( f" Epoch: {ep + 1}. Mean Return: {mean_episode_reward}. Mean Length: {sum_length / num_episodes}")
-
-        if(ep+1) % 20 == 0:
+        print( f" Epoch: {ep + 1}. Mean Return: {mean_episode_reward}. Trajectories: {num_episodes}. Mean Length: {sum_length / num_episodes} ")
+        if(ep+1) % 10 == 0:
             agent.save_models(PATH_A)
 
         if (mean_episode_reward * 1000) >= (best_reward*1000) :
-            print(" New Best Epoch rewards got ! ",mean_episode_reward)
+            print("Goin UP: New Best Epoch rewards got ! ")
             best_reward = mean_episode_reward
-            agent.save_models(PATH_B)
+        else:
+            print(f"Going DOWN: Current Best Reward {best_reward}")
 
     agent.save_models(PATH_A)
     print("Training completed _\nMean Reward {}\nMean Length {}".format(metric_a,metric_b))
@@ -169,15 +167,56 @@ PATH_A = "saved_model"
 PATH_B = "saved_best_model"
 
 
-if __name__ == '__main__':
+def make_a_race(env, agent):
+    observation = env.reset()
+    cs, csin, csout = env.cs, env.csin, env.csout
+    carx, cary = env.carx, env.cary
+    fig, ax = plt.subplots(figsize=(6, 6))
+    xs = 2 * np.pi * np.linspace(0, 1, 200)
+    ax.plot(csin(xs)[:, 0], csin(xs)[:, 1])
+    ax.plot(csout(xs)[:, 0], csout(xs)[:, 1])
+    ax.axes.set_aspect('equal')
 
+    line, = plt.plot([], [], lw=2)
+    xdata, ydata = [carx], [cary]
+
+    acc = 0
+    turn = 0
+
+    def init():
+        line.set_data([], [])
+        return line,
+
+    def counter():
+        n = 0
+        while not (env.done):
+            n += 1
+            yield n
+
+    def animate(i):
+        nonlocal observation
+        # t1 = time.time()
+        action, _ = agent.act(fromObservationToModelState(observation))
+        # t2 = time.time()
+        # print("time taken by action = {} sec.".format(t2-t1))
+        # t1 = time.time()
+        observation, reward, done = env.step(action)
+        # t2 = time.time()
+        # print("time taken by step = {} sec.".format(t2 - t1))
+        xdata.append(env.carx)
+        ydata.append(env.cary)
+        line.set_data(xdata, ydata)
+        return line,
+
+    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=counter, interval=5, blit=True, repeat=False)
+    plt.show()
+
+if __name__ == '__main__':
         # accumulator params for tests
         elapsed_time = 0
         steps, rewards = [], []
-
         #environment initialization
         env = tracks.Racer()
-
         # 1 is true, 0 is false
         doTrain = 1
         doRace = 1
@@ -185,14 +224,13 @@ if __name__ == '__main__':
         #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
         #training params in hands on 2049 steps size, PPO_EPOCHES = 10
         n_epochs = 50
-        steps_per_epoch = 512 # es: 1024, 2048, 3072, 4096
-        train_iteration = 80
+        steps_per_epoch = 3072*2 #  es 1024, 2048, 3072, 4096
+        train_iteration = 100
 
         # lr_actor,lr_critic.
-        learning_rates = 0.03, 0.03
-        loadBeforeTraining = True
-        target_kl = 1.5 * 0.1
-
+        learning_rates = 0.0008, 0.0008
+        loadBeforeTraining = 1
+        target_kl = 1.5 * 0.015
         agent = Agent(
             load_models=loadBeforeTraining,
             path_saving_model = PATH_A,
@@ -214,15 +252,18 @@ if __name__ == '__main__':
                 print(e)
 
         if doRace:
-            agent.load_models(PATH_B)
-            steps,rewards = new_race(env,agent,races=number_of_races)
-
+            agent.load_models(PATH_A)
+            for i in range(10):
+                make_a_race(env,agent)
+            #steps,rewards = new_race(env,agent,races=number_of_races)
+            #tracks.newrun(env,agent)
         #----PRINTING RESULTS-----------
-        print("\nTest Completed\n\nTraining Summary\n")
-        print("epoch number : " + str(n_epochs) + " steps_per_epoch " + str(steps_per_epoch) + " train_iteration " + str(train_iteration))
+        # print("\nTest Completed\n\nTraining Summary\n")
+        # print("epoch number : " + str(n_epochs) + " steps_per_epoch " + str(steps_per_epoch) + " train_iteration " + str(train_iteration))
+        #
+        # print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)
+        #
+        # print("####### RACE AFTER TRAIN #########")
+        # print("\nSummary of the " + str(number_of_races) + " races : \n")
+        # print_results(steps, rewards)
 
-        print("Value in fractional seconds... Elapsed_training_time : ", elapsed_time)
-
-        print("####### RACE AFTER TRAIN #########")
-        print("\nSummary of the " + str(number_of_races) + " races : \n")
-        print_results(steps, rewards)

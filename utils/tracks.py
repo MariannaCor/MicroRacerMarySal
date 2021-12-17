@@ -172,7 +172,7 @@ def lidar_grid(x,y,vx,vy,map,angle=np.pi/3,pins=19):
 
 class Racer:
     def __init__(self):
-        self.curves = 20
+        self.curves = 10
         self.tstep = 0.1
         self.max_acc = 0.1
         self.max_turn = np.pi/6

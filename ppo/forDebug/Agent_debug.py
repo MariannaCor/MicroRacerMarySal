@@ -212,10 +212,10 @@ class Agent:
 
         #by Bellman Equation
         adv = np.array(returns) - values[:-1]
-
         #normalize advantage
-        #adv = tf.keras.utils.normalize(adv)
         adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-10)
+        # normalize val_target
+        returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-10)
 
         self.memory.advantages[path_slice] = adv
         self.memory.returns[path_slice] = returns
@@ -261,11 +261,11 @@ class Agent:
         print("Training actor")
         actor_trainable_variables = self.actor.model.trainable_variables
         for iter in range(training_iteration):
-            self.train_actor_network(states, old_probs, advantages, actor_trainable_variables)
-            #if kl > target_kl:
+            kl= self.train_actor_network(states, old_probs, advantages, actor_trainable_variables)
+            if kl > target_kl:
                 # Early Stopping
             #    print("Early Stopping ! kl: {a} > target_kl : {b} ".format(a=kl, b=target_kl))
-            #    break
+                break
 
         print("Training critic")
         critic_trainable_variables = self.critic.model.trainable_variables

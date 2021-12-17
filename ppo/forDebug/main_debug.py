@@ -118,14 +118,15 @@ def fromObservationToModelState(observation):
 
 PATH_A = "../saved_model"
 PATH_B = "../saved_model"
+
 if __name__ == '__main__':
 
     loadBeforeTraining = False
 
     learning_rates = 0.03,0.01
 
-    n_epochs = 5
-    steps_per_epoch = 10
+    n_epochs =9
+    steps_per_epoch = 4096
     train_iteration = 100
     target_kl = 1.5 * 0.1
     pathA = PATH_A
