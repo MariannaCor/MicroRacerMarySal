@@ -1,32 +1,29 @@
 # IMPORTSsss
-import math
-import sys
 
 import numpy as np
-import scipy
-import scipy.signal
 
 import tensorflow as tf
 import tensorflow_probability as tfp
-from matplotlib import pyplot as plt
 
 from tensorflow import keras
 from tensorflow.keras import layers
+
+from matplotlib import pyplot as plt
+
 
 
 class Memory:
     def __init__(self, size, state_dim, num_action):
 
-        # shape = (col,righe) or (righe,colonne), size deve essere il numero di colonne ...  ?
         self.states = np.zeros(shape=(size, state_dim), dtype=np.float32)
         self.actions = np.zeros(shape=(size, num_action), dtype=np.float32)
         self.log_probs = np.zeros(size, dtype=np.float32)
-        self.rewards = np.zeros(size, dtype=np.float32)  # quella che ritorna l'environment
-        self.values = np.zeros(size, dtype=np.float32)  # quella che ritorna il critico
-        self.dones = np.zeros(size, dtype=np.float32)  # se l'episodio è finito
+        self.rewards = np.zeros(size, dtype=np.float32)
+        self.values = np.zeros(size, dtype=np.float32)
+        self.dones = np.zeros(size, dtype=np.float32)
 
-        self.advantages = np.zeros(size, dtype=np.float32)  # quella che mi serve per calcolare l'actor_loss
-        self.returns = np.zeros(size, dtype=np.float32)  # quella che mi serve per calcolare il critic loss
+        self.advantages = np.zeros(size, dtype=np.float32)
+        self.returns = np.zeros(size, dtype=np.float32)
 
         self.pointer, self.trajectory_start_index = 0, 0
 
@@ -40,7 +37,6 @@ class Memory:
         self.pointer += 1
 
     def get(self):
-        # Get all data of the buffer
         self.pointer, self.trajectory_start_index = 0, 0
 
         return (
@@ -83,9 +79,6 @@ class ActorNet():
 
 class CriticNet():
     def __init__(self, input_dims, lr):
-        # vedi altri initializers su https://keras.io/api/layers/initializers/#henormal-class
-        # al link giù ho letto che funziona bene con he_uniform ma non va oltre i 250 in realtà
-        # https://machinelearningmastery.com/weight-initialization-for-deep-learning-neural-networks/
 
         initializer =tf.keras.initializers.RandomUniform(minval=0.003, maxval=+0.003)
 
@@ -118,16 +111,14 @@ class Agent:
             self.load_models(path_saving_model)
             self.actor.model.trainable = True
             self.critic.model.trainable = True
-            #per tutti i livelli interni metto i valori di train_direction e accelleration dati.
-            # 1,3,5 sono i layers di accellerazione
+            #insert in each level train_direction and acceleration data
+            # 1,3,5 acc layers
             for layer in self.actor.model.layers:
                 if layer.name[0:3] == "acc":
                     layer.trainable = train_acceleration
                 if layer.name[0:3] == "dir":
                     layer.trainable = train_direction
 
-
-        # Don't forget to re-compile the model
         self.actor.model.compile(optimizer=self.actor.optimizer)
         self.critic.model.compile(optimizer=self.critic.optimizer, loss='mse')
 
@@ -154,7 +145,6 @@ class Agent:
     @tf.function
     def act(self, state, action=None):
         dists = tf.convert_to_tensor(self.actor.model(state))
-        #mean_acc, stddev_acc, mean_dir, stddev_dir = tf.split(dists, num_or_size_splits=4, axis=1)
         mean_acc,  mean_dir  = tf.split(dists, num_or_size_splits=2, axis=1)
         # reshaping used in training phase
         mean_acc = tf.reshape(mean_acc, shape=[-1])
@@ -175,13 +165,13 @@ class Agent:
             log_probs = acc_log_probs+dir_log_probs
 
         else:
-            # a sort of split by columns
+            # split by columns
             acc_values, dir_values = tf.split(action,num_or_size_splits=2,axis=1)
             acc_values = tf.reshape(acc_values, shape=[-1])
             dir_values = tf.reshape(dir_values, shape=[-1])
             log_probs = tf.add(acc_distribution.log_prob(acc_values), dir_distribution.log_prob(dir_values))
 
-        # Es di output returned is made of pair: [ accelleration_value, direction_value ], [ sum_value_of_logprobs ]
+        # Data to return: [ accelleration_value, direction_value ], [ sum_value_of_logprobs ]
         return action, log_probs
 
 
@@ -197,20 +187,11 @@ class Agent:
         for i in reversed(range(len(rewards))):
             delta = rewards[i] + gamma * values[i + 1] * (1 - int(dones[i])) - values[i]
             gae = delta + (gamma * lam * (1 - int(dones[i]))) * gae
-            #print(f"{i}: gae = {gae}")
-            #print(f"{i}: values = {values[i]}")
             returns.insert(0, gae + values[i])
 
-        #print(f"returns {returns}")
-        #print(f"values[:-1] {values[:-1]}")
         #by Bellman Equation
         adv = np.array(returns) - values[:-1]
-        #print(f"adv {adv}")
-        # normalize advantage
-        #adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-8)
-        #print(f"normalized adv {adv}")
-        # normalize val_target
-        #returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-10)
+
         self.memory.advantages[path_slice] = adv
         self.memory.returns[path_slice] = returns
         self.memory.trajectory_start_index = self.memory.pointer
@@ -224,7 +205,6 @@ class Agent:
             clip_ratio = self.clip_ratio
             ratio = tf.exp(new_probs - old_probs )
             surr1 = - advantages * ratio
-            #surr2 = advantages * tf.clip_by_value(t=ratio, clip_value_min=1-clip_value, clip_value_max=1+clip_value)
             surr2 = - tf.where(advantages > 0, (1 + clip_ratio) * advantages,(1 - clip_ratio) * advantages)
             actor_loss = tf.reduce_mean( tf.maximum(surr1, surr2) )
 
@@ -260,7 +240,6 @@ class Agent:
         returns = tf.convert_to_tensor(returns)
 
         # update actor network
-        #print("Training actor")
         actor_trainable_variables = self.actor.model.trainable_variables
         for i in range(training_iteration):
              mean_diff = self.train_actor_network(states, actions, old_probs, advantages, actor_trainable_variables)
@@ -269,7 +248,6 @@ class Agent:
                 break
 
         # update critic network
-        #print("Training critic")
         critic_trainable_variables = self.critic.model.trainable_variables
         for _ in range(training_iteration):
            self.train_critic_network(states, returns, critic_trainable_variables)

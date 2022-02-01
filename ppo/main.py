@@ -1,6 +1,4 @@
 import gc
-import sys
-import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,11 +7,6 @@ from matplotlib import animation
 
 from utils import tracks
 from ppo.Agent import Agent
-
-# from MicroRacer_Corinaldesi_Fiorilla import tracks
-# from MicroRacer_Corinaldesi_Fiorilla.ppo.Agent2 import Agent2
-#tf.executing_eagerly()
-#tf.compat.v1.enable_eager_execution()
 
 
 def max_lidar(observation, angle=np.pi / 3, pins=19):
@@ -29,6 +22,7 @@ def max_lidar(observation, angle=np.pi / 3, pins=19):
     else:
         distr = observation[arg + 1]
     return dir, (distl, dist, distr)
+
 def observe(racer_state):
     if racer_state == None:
         return np.array([0])  # not used; we could return None
@@ -43,7 +37,7 @@ def fromObservationToModelState(observation):
     return state
 
 def new_race(env, agent, races=35):
-    #print("NEW RACES ")
+
     total_rewards = []
     total_steps = []
 
@@ -65,7 +59,7 @@ def new_race(env, agent, races=35):
     return total_steps,total_rewards
 
 def print_results(steps, rewards):
-    # risultati delle corse dopo il training per ogni epoca
+    # race results after training
     print("Total Reward => ", rewards)
     print("Steps done for race => ", steps)
     print("Mean Reward : ", np.mean(rewards))
@@ -87,7 +81,6 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
     print(f"Actor_lr {agent.lr_actor}. Critic_lr {agent.lr_critic}. clip_value {agent.clip_ratio}. "
           f"N_epochs {n_epochs}. steps_per_epoch {steps_per_epoch}. train_iteraion {train_iteration}. " 
           f"target_mean_diff {target_mean_diff}. ")
-          #f"Tests on {races_for_test} races")
 
     metric_a = []
     metric_b = []
@@ -117,17 +110,16 @@ def training_agent(env,agent, n_epochs, steps_per_epoch, train_iteration, target
     state = fromObservationToModelState(observation)
 
     for ep in range(n_epochs):
-        #print(ep+1, " EPOCH")
-        gc.collect() #ogni cosa che non è puntanta viene cancellata
+        #garbage collector
+        gc.collect()
+
         # Initialize the sum of the returns, lengths and number of episodes for each epoch
         sum_return = 0
         sum_length = 0
         num_episodes = 0
 
-        #print("Collecting new episodes")
+
         for t in range(steps_per_epoch):
-            #if (t+1)% 1000 == 0:
-                #print("collected {} steps ".format(t+1))
 
             #take a step into the environment
             action, dists = agent.act(state)
@@ -236,6 +228,7 @@ def make_a_race(racer,agent):
 
     anim = animation.FuncAnimation(fig, animate, init_func=init, frames=counter, interval=5, blit=True, repeat=False)
     plt.show()
+
 #global variables
 START_MODEL = "best_tested"
 PATH_A = "saved_model"
@@ -252,7 +245,7 @@ if __name__ == '__main__':
         env = tracks.Racer()
         # 1 is true, 0 is false
         doTrain = 0
-        doRace  = 1
+        doRace = 1
         doTest = 0
 
         #training params come in cartpole PPO keras : 30 epoche, 80 train_iteration e 40000 steps
