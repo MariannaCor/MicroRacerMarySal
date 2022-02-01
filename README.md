@@ -1,6 +1,6 @@
 # MicroRacer - Corinaldesi & Fiorilla
 
-An implementation of a PPO agent capable of running in the MircroRaces environment.
+An implementation of a PPO agent capable of acting in the MircroRaces environment.
 The project was developed for the Machine Learning course of the University of Bologna. 
 
 Link to the MicroRacer environment : https://github.com/asperti/MicroRacer 
