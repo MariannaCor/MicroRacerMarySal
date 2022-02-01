@@ -7,7 +7,7 @@ Link to the MicroRacer environment : https://github.com/asperti/MicroRacer
 
 ![example](https://user-images.githubusercontent.com/27771578/151928586-f5513c6a-6604-49d6-a000-6b12291afc93.png)
 
-Tha algorithm also is inspired by the following papers and docs about PPO are:
+Tha PPO algorithm is also inspired by the following papers and docs:
 
 [1] https://keras.io/examples/rl/ppo_cartpole/
 
